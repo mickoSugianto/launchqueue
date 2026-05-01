@@ -51,7 +51,7 @@ export default function DropPage() {
 
       // SUCCESS
       toast.success("Inventory Locked! You have 15 minutes to check out.");
-      router.push("/checkout/${data.id}");
+      router.push(`/checkout/${data.id}`);
     } catch (err) {
       toast.error("Network error. Please try again.");
     } finally {
