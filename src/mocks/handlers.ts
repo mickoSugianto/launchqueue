@@ -9,7 +9,25 @@ if (!globalStore.dbCampaign) {
   globalStore.dbCampaign = JSON.parse(JSON.stringify(mockCampaign));
 }
 if (!globalStore.dbOrders) {
-  globalStore.dbOrders = [];
+  globalStore.dbOrders = [
+    {
+      id: "debug_123",
+      variantId: "var_kith_blk_m",
+      status: "READY_TO_SHIP",
+      expiresAt: new Date(Date.now() + 100000000).toISOString(),
+      customer: {
+        name: "Developer Mode",
+        email: "dev@launchqueue.com",
+        whatsapp: "08123456789",
+        address: "Jl. Sudirman Kav 21",
+        city: "Jakarta",
+        postalCode: "12190",
+      },
+      subtotal: 2500000,
+      shippingFee: 50000,
+      totalAmount: 2550000,
+    },
+  ];
 }
 
 const getOrders = (): Order[] => globalStore.dbOrders;
@@ -154,7 +172,7 @@ export const handlers = [
     const order = orders[orderIndex];
     if (new Date() > new Date(order.expiresAt)) {
       order.status = "EXPIRED";
-      sessionStorage.setItem("dbOrders", JSON.stringify(orders));
+      saveOrder(order);
       return HttpResponse.json({ error: "SESSION_EXPIRED" }, { status: 410 });
     }
 
@@ -163,7 +181,7 @@ export const handlers = [
     order.customer = shippingDetails;
 
     // SAVE THE UPDATED DATABASE
-    sessionStorage.setItem("dbOrders", JSON.stringify(orders));
+    saveOrder(order);
 
     // RETURN THE SUCCESS RECEIPT
     return HttpResponse.json({
