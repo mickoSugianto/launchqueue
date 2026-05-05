@@ -12,7 +12,7 @@ export function useCheckout(sessionId: string) {
   const { data, error, isLoading } = useSWR(
     sessionId ? `/api/checkout/${sessionId}` : null,
     fetcher,
-    { revalidateOnFocus: false },
+    { refreshInterval: 3000, revalidateOnFocus: false },
   );
 
   return {

@@ -44,7 +44,7 @@ export default function ReceiptPage() {
   }
 
   // GATEKEEPER: INVALID, EXPIRED, OR UNPAID ORDERS
-  if (!isError || !order || !VALID_RECEIPT_STATUSES.includes(order.status)) {
+  if (isError || !order || !VALID_RECEIPT_STATUSES.includes(order.status)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 space-y-4">
         <p className="text-sm font-bold tracking-widest uppercase text-red-500">
@@ -94,7 +94,7 @@ export default function ReceiptPage() {
               </h2>
             </div>
             <p className="text-sm text-zinc-500 font-medium">
-              Thank you, {order.customer.name.split(" ")[0]}. Your order has
+              Thank you, {order.customer.fullName.split(" ")[0]}. Your order has
               been received and is being processed.
             </p>
           </div>
@@ -108,13 +108,14 @@ export default function ReceiptPage() {
               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-zinc-100 -z-10" />
               {/* PROGRESS LINE */}
               <div
-                className={`absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-zinc-900 -z-10 transition-all duration-3000 ${isMounted ? currentStepStyle[currentStepIndex] || "w-0" : "w-0"}`}
+                className={`absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-zinc-900 -z-10 transition-all ease-linear ${isMounted ? currentStepStyle[currentStepIndex] || "w-0" : "w-0"}`}
+                style={{ transitionDuration: `${currentStepIndex * 1000}ms` }}
               />
               {timelineSteps.map((step, index) => {
                 const isActive = isMounted && index <= currentStepIndex;
                 const Icon = step.icon;
 
-                const delayMs = index * 1000;
+                const delayMs = Math.max(0, index * 1000 - 150);
 
                 return (
                   <div
@@ -122,7 +123,7 @@ export default function ReceiptPage() {
                     className="flex flex-col items-center gap-3 bg-white px-2 z-10"
                   >
                     <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors duration-500 ${isActive ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-300"}`}
+                      className={`w-10 h-10 mt-3 rounded-full flex items-center justify-center border-2 transition-colors duration-500 ${isActive ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-300"}`}
                       style={{ transitionDelay: `${delayMs}ms` }}
                     >
                       <Icon className="w-5 h-5" />
@@ -151,8 +152,10 @@ export default function ReceiptPage() {
               </div>
               <div>
                 <p className="font-bold mb-1">Address</p>
-                <p className="text-zinc-600">{order.customer.name}</p>
-                <p className="text-zinc-600">{order.customer.address}</p>
+                <p className="text-zinc-600">{order.customer.fullName}</p>
+                <p className="text-zinc-600">
+                  {order.customer.shippingAddress}
+                </p>
                 <p className="text-zinc-600">
                   {order.customer.city}, {order.customer.postalCode}
                 </p>

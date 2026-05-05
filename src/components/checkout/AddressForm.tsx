@@ -3,15 +3,15 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 // THE ZOD SCHEMA: STRICT VALIDATION RULES
 const checkoutSchema = z.object({
   fullName: z.string().min(3, "Full name must be at least 3 characters"),
   email: z.string().email("Invalid email address"),
-  phone: z.string().min(10, "Phone number must be at least 10 digits"),
-  address: z.string().min(10, "Please enter your full street address"),
+  whatsapp: z.string().min(10, "Whatsapp number must be at least 10 digits"),
+  shippingAddress: z.string().min(10, "Please enter your full street address"),
   city: z.enum(["Jakarta", "Bandung", "Surabaya", "Bali", "Medan"], {
     message: "Please select a valid shipping destination",
   }),
@@ -21,18 +21,35 @@ const checkoutSchema = z.object({
 // INFER THE TYPESCRIPT TYPE DIRECTLY FROM THE ZOD SCHEMA
 type CheckoutFormData = z.infer<typeof checkoutSchema>;
 
-export function AddressForm({ sessionId }: { sessionId: string }) {
+export function AddressForm({
+  sessionId,
+  onCityChange,
+}: {
+  sessionId: string;
+  onCityChange: (city: string) => void;
+}) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // INITIALIZE REACT HOOK FORM
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors, isValid },
   } = useForm<CheckoutFormData>({
     resolver: zodResolver(checkoutSchema),
     mode: "onTouched", // validate only after the user clicks out of the box
   });
+
+  // WATCH THE CITY INPUT
+  const selectedCity = watch("city");
+
+  // BROADCAST IT TO THE PARENT
+  useEffect(() => {
+    if (selectedCity) {
+      onCityChange(selectedCity);
+    }
+  }, [selectedCity, onCityChange]);
 
   // THE SUBMIT HANDLER
   const router = useRouter();
@@ -115,41 +132,41 @@ export function AddressForm({ sessionId }: { sessionId: string }) {
       {/* PHONE NUMBER */}
       <div className="space-y-2">
         <label
-          htmlFor="phone"
+          htmlFor="whatsapp"
           className="text-xs font-bold tracking-widest uppercase text-zinc-500"
         >
           Whatsapp Number
         </label>
         <input
-          id="phone"
-          {...register("phone")}
-          className={`w-full p-3 border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 ${errors.phone ? "border-red-500 bg-red-50" : "border-zinc-300 bg-zinc-50"}`}
+          id="whatsapp"
+          {...register("whatsapp")}
+          className={`w-full p-3 border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 ${errors.whatsapp ? "border-red-500 bg-red-50" : "border-zinc-300 bg-zinc-50"}`}
           placeholder="081234567890"
         />
-        {errors.phone && (
+        {errors.whatsapp && (
           <p className="text-xs text-red-500 font-medium">
-            {errors.phone.message}
+            {errors.whatsapp.message}
           </p>
         )}
       </div>
       {/* FULL ADDRESS */}
       <div className="space-y-2">
         <label
-          htmlFor="address"
+          htmlFor="shippingAddress"
           className="text-xs font-bold tracking-widest uppercase text-zinc-500"
         >
           Street Address
         </label>
         <textarea
-          id="address"
-          {...register("address")}
+          id="shippingAddress"
+          {...register("shippingAddress")}
           rows={3}
-          className={`w-full p-3 border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 ${errors.address ? "border-red-500 bg-red-50" : "border-zinc-300 bg-zinc-50"}`}
+          className={`w-full p-3 border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 ${errors.shippingAddress ? "border-red-500 bg-red-50" : "border-zinc-300 bg-zinc-50"}`}
           placeholder="Jl. Sudirman Kav 21..."
         />
-        {errors.address && (
+        {errors.shippingAddress && (
           <p className="text-xs text-red-500 font-medium">
-            {errors.address?.message}
+            {errors.shippingAddress?.message}
           </p>
         )}
       </div>

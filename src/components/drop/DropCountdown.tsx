@@ -1,6 +1,5 @@
 "use client";
 
-import { time } from "console";
 import { useEffect, useState } from "react";
 
 interface DropCountdownProps {

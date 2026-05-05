@@ -1,47 +1,85 @@
 import { http, HttpResponse, delay } from "msw";
 import { mockCampaign, mockShippingRates, colorImageMap } from "./data";
-import { Order } from "../types";
+import { Order, ProductVariant, OrderStatus } from "../types";
 import { get } from "http";
 
-// SURVIVAL DB: CREATE A DB THAT SURVIVES NEXT.JS FAST REFRESH & SSR
+// LOCALSTORAGE
+const IS_BROWSER = typeof window !== "undefined";
+
 const globalStore = globalThis as any;
 if (!globalStore.dbCampaign) {
   globalStore.dbCampaign = JSON.parse(JSON.stringify(mockCampaign));
 }
-if (!globalStore.dbOrders) {
-  globalStore.dbOrders = [
-    {
-      id: "debug_123",
-      variantId: "var_kith_blk_m",
-      status: "READY_TO_SHIP",
-      expiresAt: new Date(Date.now() + 100000000).toISOString(),
-      customer: {
-        name: "Developer Mode",
-        email: "dev@launchqueue.com",
-        whatsapp: "08123456789",
-        address: "Jl. Sudirman Kav 21",
-        city: "Jakarta",
-        postalCode: "12190",
-      },
-      subtotal: 2500000,
-      shippingFee: 50000,
-      totalAmount: 2550000,
-    },
-  ];
-}
 
-const getOrders = (): Order[] => globalStore.dbOrders;
-const saveOrder = (order: Order) => globalStore.dbOrders.push(order);
+// THE SEED DATA
+const defaultOrders: Order[] = [
+  {
+    id: "debug_123",
+    campaignId: "camp_kith_001",
+    variantId: "var_kith_blk_l",
+    status: "IN_PRODUCTION",
+
+    totalPcs: 1,
+    totalWeightKG: 0.8,
+
+    subtotal: 2500000,
+    shippingFee: 9000,
+    totalAmount: 2550000,
+
+    lockedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 100000000).toISOString(),
+
+    customer: {
+      fullName: "Developer Mode",
+      email: "dev@launchqueue.com",
+      whatsapp: "08123456789",
+      shippingAddress: "Jl. Sudirman Kav 21",
+      city: "Jakarta",
+      postalCode: "12190",
+    },
+
+    item: {
+      name: "Kith Drop",
+      color: "Black",
+      size: "L",
+      heroImage:
+        "https://kith.com/cdn/shop/files/KHM034254-001-Front_125bfc94-5392-4b20-9e2b-db8b433fd562.jpg?v=1762458654&width=1440",
+    },
+  },
+];
+
+const getOrders = (): Order[] => {
+  if (IS_BROWSER) {
+    const stored = localStorage.getItem("dbOrders");
+    if (stored) return JSON.parse(stored);
+
+    // IF EMPTY, SEED IT WITH DEBUG ORDER
+    localStorage.setItem("dbOrders", JSON.stringify(defaultOrders));
+    return defaultOrders;
+  }
+
+  // FALLBACK FOR SSR
+  if (!globalStore.dbOrders) globalStore.dbOrders = [...defaultOrders];
+  return globalStore.dbOrders;
+};
+
+const saveOrderList = (newOrders: Order[]) => {
+  if (IS_BROWSER) {
+    localStorage.setItem("dbOrders", JSON.stringify(newOrders));
+  } else {
+    globalStore.dbOrders = newOrders;
+  }
+};
 
 export const handlers = [
   // 1. FETCH CAMPAIGN ENDPOINT
   http.get("/api/campaigns/:slug", async ({ params }) => {
-    await delay(800); // 1. Simulating real-world latency
+    await delay(800);
 
     const dbCampaign = globalStore.dbCampaign;
 
     if (params.slug !== dbCampaign.slug) {
-      return HttpResponse.json({ message: "Not Found" }, { status: 404 }); // 2. Returning the data
+      return HttpResponse.json({ message: "Not Found" }, { status: 404 });
     }
 
     // CHAOS SIMULATOR
@@ -50,7 +88,7 @@ export const handlers = [
 
     // IF THE DROP IS LIVE, SIMULATE HIGH CONCURRENCY TRAFFIC
     if (now >= dropDate) {
-      dbCampaign.variants.forEach((variant: any) => {
+      dbCampaign.variants.forEach((variant: ProductVariant) => {
         if (variant.availableInventory > 0) {
           const ghostPurchases = Math.floor(Math.random() * 4);
           variant.availableInventory = Math.max(
@@ -71,9 +109,11 @@ export const handlers = [
 
   // 3. THE INVENTORY LOCK ENDPOINT
   http.post("/api/checkout/lock", async ({ request }) => {
-    await delay(1200); // Simulate a heavy database transaction
+    await delay(1200);
 
     const body = (await request.json()) as { variantId: string; city: string };
+
+    const dbCampaign = globalStore.dbCampaign;
     const variant = mockCampaign.variants.find((v) => v.id === body.variantId);
 
     // THE RACE CONDITION CHECK
@@ -82,7 +122,7 @@ export const handlers = [
     }
 
     // THE TIME SECURITY CHECK (Never trust the client!)
-    if (new Date() < new Date(mockCampaign.dropDate)) {
+    if (new Date() < new Date(dbCampaign.dropDate)) {
       return HttpResponse.json({ error: "DROP_NOT_ACTIVE" }, { status: 403 });
     }
 
@@ -91,7 +131,7 @@ export const handlers = [
     // CREATING THE TEMPORARY RECEIPT
     const newOrder: Order = {
       id: `ord_${Math.random().toString(36).slice(2, 9)}`,
-      campaignId: mockCampaign.id,
+      campaignId: dbCampaign.id,
       variantId: variant.id,
       status: "AWAITING_PAYMENT",
       totalPcs: 1,
@@ -102,16 +142,25 @@ export const handlers = [
       lockedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 15 * 60000).toISOString(),
       customer: {
-        name: "",
+        fullName: "",
         email: "",
         whatsapp: "",
         shippingAddress: "",
         city: body.city,
+        postalCode: "",
+      },
+      item: {
+        name: dbCampaign.title || "Kith Drop",
+        color: variant.color,
+        size: variant.size,
+        heroImage: colorImageMap[variant.color],
       },
     };
 
-    // SAVE TO PERSISTENT STORAGE
-    saveOrder(newOrder);
+    // DUAL-STORAGE
+    const orders = getOrders();
+    orders.push(newOrder);
+    saveOrderList(orders);
 
     return HttpResponse.json(newOrder);
   }),
@@ -122,7 +171,6 @@ export const handlers = [
 
     // FIND THE ORDER IN OUR DATABASE
     const order = getOrders().find((o) => o.id === params.sessionId);
-    const dbCampaign = globalStore.dbCampaign;
 
     if (!order) {
       return HttpResponse.json({ error: "SESSION_NOT_FOUND" }, { status: 404 });
@@ -134,23 +182,7 @@ export const handlers = [
       return HttpResponse.json({ error: "SESSION_EXPIRED" }, { status: 410 });
     }
 
-    // FIND THE DEHYDRATED VARIANT IN THE CAMPAIGN
-    const variant = dbCampaign.variants.find(
-      (v: any) => v.id === order.variantId,
-    );
-
-    // HYDRATE, STITCH THE ORDER, VARIANT DETAILS, AND THE MAPPED IMAGE TOGETHER
-    const hydratedOrder = {
-      ...order,
-      item: {
-        name: variant.name,
-        color: variant.color,
-        size: variant.size,
-        heroImage: colorImageMap[variant.color] || dbCampaign.heroImages[0],
-      },
-    };
-
-    return HttpResponse.json(hydratedOrder);
+    return HttpResponse.json(order);
   }),
 
   // 5. THE FINALIZATION ENDPOINT (PROCESS PAYMENT & COMPLETE ORDER)
@@ -163,16 +195,16 @@ export const handlers = [
     // FETCH THE PERSISTENT DATABASE
     const orders = getOrders();
     const orderIndex = orders.findIndex((o) => o.id === sessionId);
+    const order = orders[orderIndex];
 
     if (orderIndex === -1) {
       return HttpResponse.json({ error: "ORDER_NOT_FOUND" }, { status: 404 });
     }
 
     // SECURITY CHECK: MAKE SURE IT HASN'T EXPIRED WHILE THEY WERE TYPING
-    const order = orders[orderIndex];
     if (new Date() > new Date(order.expiresAt)) {
       order.status = "EXPIRED";
-      saveOrder(order);
+      saveOrderList(orders);
       return HttpResponse.json({ error: "SESSION_EXPIRED" }, { status: 410 });
     }
 
@@ -180,13 +212,50 @@ export const handlers = [
     order.status = "PAYMENT_VERIFIED";
     order.customer = shippingDetails;
 
+    // RECALCULATE THE SHIPPING FEE BASED ON THE SUBMITTED CITY
+    const finalCity = shippingDetails.city;
+    const finalShippingFee = mockShippingRates[finalCity] ?? 25000;
+
+    order.shippingFee = finalShippingFee;
+    order.totalAmount = order.subtotal + finalShippingFee;
+
     // SAVE THE UPDATED DATABASE
-    saveOrder(order);
+    saveOrderList(orders);
 
     // RETURN THE SUCCESS RECEIPT
     return HttpResponse.json({
       success: true,
       receiptUrl: `/receipt/${sessionId}`,
     });
+  }),
+
+  // 6. ADMIN: FETCH ALL ORDERS
+  http.get("/api/admin/orders", async () => {
+    await delay(400);
+    return HttpResponse.json(getOrders());
+  }),
+
+  // 7. ADMIN : MUTATE ORDER STATUS
+  http.patch("/api/admin/orders/:id", async ({ params, request }) => {
+    await delay(800);
+
+    const body = (await request.json()) as { status: OrderStatus };
+    const { status } = body;
+
+    const orders = getOrders();
+    const orderIndex = orders.findIndex((o) => o.id === params.id);
+    const order = orders[orderIndex];
+
+    if (orderIndex === -1) {
+      return HttpResponse.json({ error: "ORDER_NOT_FOUND" }, { status: 404 });
+    }
+
+    // MUTATE THE GLOBAL STORE
+    order.status = status;
+
+    // UPDATE THE CHANGE TO LOCALSTORAGE
+    saveOrderList(orders);
+
+    return HttpResponse.json({ success: true, order });
   }),
 ];

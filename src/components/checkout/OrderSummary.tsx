@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { Order } from "@/types";
 
 // HELPER FUNCTION TO FORMAT IDR CURRENCY
 const formatter = new Intl.NumberFormat("id-ID", {
@@ -11,9 +12,19 @@ const formatter = new Intl.NumberFormat("id-ID", {
 
 const formatIDR = (amount: number) => formatter.format(amount);
 
-export function OrderSummary({ order }: { order: any }) {
+export function OrderSummary({
+  order,
+  dynamicShippingFee,
+}: {
+  order: Order;
+  dynamicShippingFee?: number;
+}) {
   // EXTRACTING THE HYDRATED DATA IN MSW
-  const { item, subtotal, shippingFee, totalAmount } = order;
+  const { item, subtotal } = order;
+
+  // RECALCULATE: IF THE PARENT GIVES A DYNAMIC FEE. OTHERWISE, USE THE DB FALLBACL
+  const activeShippingFee = dynamicShippingFee ?? order.shippingFee;
+  const activeTotal = subtotal + activeShippingFee;
 
   return (
     <div className="bg-white border border-zinc-200 rounded-sm overflow-hidden">
@@ -50,14 +61,14 @@ export function OrderSummary({ order }: { order: any }) {
         </div>
         <div className="flex justify-between text-zinc-500">
           <span>Estimated Shipping</span>
-          <span className="text-zinc-900">{formatIDR(shippingFee)}</span>
+          <span className="text-zinc-900">{formatIDR(activeShippingFee)}</span>
         </div>
         <div className="pt-3 border-t border-zinc-200 flex justify-between items-center">
           <span className="font-bold tracking-widest uppercase text-xs">
             Total
           </span>
           <span className="text-lg font-black tracking-tighter">
-            {formatIDR(totalAmount)}
+            {formatIDR(activeTotal)}
           </span>
         </div>
       </div>

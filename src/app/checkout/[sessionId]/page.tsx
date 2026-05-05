@@ -6,13 +6,32 @@ import { ShieldCheck } from "lucide-react"; // shadcn uses lucide-react for icon
 import { CheckoutTimer } from "@/components/checkout/CheckoutTimer";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { AddressForm } from "@/components/checkout/AddressForm";
+import { useEffect, useState } from "react";
+import { ShippingRates } from "@/types";
 
 export default function CheckoutPage() {
   const params = useParams<{ sessionId: string }>();
   const router = useRouter();
 
-  // FETCH THE HYDRATED ORDER
+  // FETCH THE ORDER
   const { order, isLoading, isError } = useCheckout(params.sessionId);
+
+  // STATES FOR SHIPPING RATES AND SELECTED CITY
+  const [rates, setRates] = useState<ShippingRates>({});
+  const [dynamicCity, setDynamicCity] = useState<string>("");
+
+  // FETCH THE RATES
+  useEffect(() => {
+    fetch("/api/shipping-rates")
+      .then((res) => res.json())
+      .then((data) => setRates(data));
+  }, []);
+
+  // CALCULATE THE DYNAMIC FEE
+  const dynamicShippingFee =
+    dynamicCity && rates[dynamicCity] !== undefined
+      ? rates[dynamicCity]
+      : order?.shippingFee;
 
   // LOADING STATE
   if (isLoading) {
@@ -66,12 +85,12 @@ export default function CheckoutPage() {
               Please enter your destination address.
             </p>
           </div>
-          <AddressForm sessionId={order.id} />
+          <AddressForm sessionId={order.id} onCityChange={setDynamicCity} />
         </div>
         {/* RIGHT COLUMN: THE LEDGER / SUMMARY (40%) */}
         <div className="lg:col-span-5 space-y-6 lg:sticky lg:top-8">
           <CheckoutTimer expiresAt={order.expiresAt} />
-          <OrderSummary order={order} />
+          <OrderSummary order={order} dynamicShippingFee={dynamicShippingFee} />
         </div>
       </main>
     </div>

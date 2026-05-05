@@ -35,6 +35,21 @@ export interface Campaign {
   variants: ProductVariant[]; // The different sizes/colors available
 }
 
+export interface Customer {
+  fullName: string;
+  email: string;
+  whatsapp: string;
+  shippingAddress: string;
+  city: string;
+  postalCode: string;
+}
+
+export interface Item {
+  name: string;
+  color: string;
+  size: string;
+  heroImage: string;
+}
 export interface Order {
   id: string; // e.g., "ord_9a8b7c6d" (Used for the public tracking link)
   campaignId: string; // Ties this order to the specific drop event
@@ -43,7 +58,6 @@ export interface Order {
 
   totalPcs: number;
   totalWeightKG: number;
-
   subtotal: number;
   shippingFee: number;
   totalAmount: number;
@@ -51,11 +65,7 @@ export interface Order {
   lockedAt: string; // ISO Date String: The exact millisecond they entered checkout
   expiresAt: string; // ISO Date String: exactly 15 minutes after lockedAt
 
-  customer: {
-    name: string;
-    email: string; // Where we send the receipt/tracking link
-    whatsapp: string; // For seller records
-    shippingAddress: string;
-    city: string; // Used to calculate the shipping fee
-  };
+  customer: Customer;
+
+  item: Item;
 }
