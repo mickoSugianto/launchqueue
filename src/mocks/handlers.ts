@@ -114,7 +114,9 @@ export const handlers = [
     const body = (await request.json()) as { variantId: string; city: string };
 
     const dbCampaign = globalStore.dbCampaign;
-    const variant = mockCampaign.variants.find((v) => v.id === body.variantId);
+    const variant = dbCampaign.variants.find(
+      (v: ProductVariant) => v.id === body.variantId,
+    );
 
     // THE RACE CONDITION CHECK
     if (!variant || variant.availableInventory <= 0) {
@@ -125,6 +127,9 @@ export const handlers = [
     if (new Date() < new Date(dbCampaign.dropDate)) {
       return HttpResponse.json({ error: "DROP_NOT_ACTIVE" }, { status: 403 });
     }
+
+    // LOCK THE INVENTORY
+    variant.availableInventory -= 1;
 
     const shippingFee = mockShippingRates[body.city] || 25000;
 

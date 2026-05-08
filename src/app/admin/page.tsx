@@ -11,6 +11,13 @@ import {
 } from "lucide-react";
 import { Order } from "@/types";
 import { useAdminOrders } from "@/lib/hooks/useAdminOrders";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 // THE PRECISE STATE MACHINE FLOW
 const STATUS_FLOW: Record<string, string | null> = {
@@ -28,10 +35,7 @@ const COLUMNS = [
 ];
 
 export default function AdminDashboard() {
-  // const [orders, setOrders] = useState<any[]>([]);
-  // const [isLoading, setIsLoading] = useState(true);
-
-  const { rawOrders, orders, mutate, isLoading } = useAdminOrders();
+  const { rawOrders, activeOrders, mutate, isLoading } = useAdminOrders();
 
   // STATE TO TRACK WHICH ORDER THE ADMIN CLICKED "ADVANCE" ON (MODAL)
   const [pendingOrder, setPendingOrder] = useState<{
@@ -89,14 +93,14 @@ export default function AdminDashboard() {
             Fulfillment HQ
           </h1>
           <p className="text-sm text-zinc-500 font-medium mt-1">
-            {orders.length} active orders in the pipeline
+            {activeOrders.length} active orders in the pipeline
           </p>
         </div>
       </header>
       {/* THE KANBAN GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
         {COLUMNS.map((col) => {
-          const colOrders = orders.filter((o) => o.status === col.id);
+          const colOrders = activeOrders.filter((o) => o.status === col.id);
           const ColIcon = col.icon;
 
           return (
@@ -169,53 +173,61 @@ export default function AdminDashboard() {
         })}
       </div>
       {/* THE CONFIRMATION MODAL */}
-      {pendingOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/40 backdrop-blur-sm">
-          <div className="bg-white max-w-sm w-full rounded-sm shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <AlertCircle className="w-5 h-5 text-amber-600" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-900">
-                    Confirm Advancement
-                  </h3>
-                  <p className="text-xs text-zinc-500 font-medium mt-1">
-                    Order {pendingOrder.id.split("_")[1].toUpperCase()}
-                  </p>
-                </div>
+      <Dialog
+        open={!!pendingOrder}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setPendingOrder(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm rounded-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3 text-sm font-bold uppercase tracking-widest text-zinc-900">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
               </div>
-              <p className="text-sm text-zinc-600 font-medium">
-                Are you sure you want to move this order to{" "}
-                <span className="font-bold text-zinc-900">
-                  {STATUS_FLOW[pendingOrder.currentStatus]?.replace(/_/g, " ")}
-                </span>
-                ? This action will update the customer's tracking page.
-              </p>
-            </div>
-            <div className="bg-zinc-50 px-6 py-4 flex justify-end gap-3 border-t border-zinc-200">
-              <button
-                onClick={() => setPendingOrder(null)}
-                className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-zinc-900 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() =>
-                  advanceOrderStatus(
-                    pendingOrder.id,
-                    pendingOrder.currentStatus,
-                  )
-                }
-                className="px-4 py-2 text-xs font-bold uppercase tracking-widest bg-zinc-900 text-white rounded-sm hover:bg-zinc-800 transition-colors cursor-pointer"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              Confirm Advancement
+            </DialogTitle>
+          </DialogHeader>
+          {pendingOrder && (
+            <>
+              <div className="py-2">
+                <p className="text-xs text-zinc-500 font-medium mb-3">
+                  Order {pendingOrder.id.split("_")[1].toUpperCase()}
+                </p>
+                <p className="text-sm text-zinc-600 font-medium">
+                  Are you sure you want to move this order to{" "}
+                  <span className="font-bold text-zinc-900">
+                    {STATUS_FLOW[pendingOrder.currentStatus]?.replace(
+                      /_/g,
+                      " ",
+                    )}
+                  </span>
+                  ? This action will update the customer's tracking page.
+                </p>
+              </div>
+              <DialogFooter className="sm:justify-end border-t border-zinc-100 pt-4 mt-2">
+                <button
+                  onClick={() => setPendingOrder(null)}
+                  className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-zinc-900 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() =>
+                    advanceOrderStatus(
+                      pendingOrder.id,
+                      pendingOrder.currentStatus,
+                    )
+                  }
+                  className="px-4 py-2 text-xs font-bold uppercase tracking-widest bg-zinc-900 text-white rounded-sm hover:bg-zinc-800 transition-colors cursor-pointer"
+                >
+                  Confirm
+                </button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

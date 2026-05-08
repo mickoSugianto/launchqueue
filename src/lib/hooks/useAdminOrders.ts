@@ -17,7 +17,7 @@ export function useAdminOrders() {
 
   return {
     rawOrders: data,
-    orders: activeOrders,
+    activeOrders: activeOrders,
     mutate,
     isLoading,
     isError: error,

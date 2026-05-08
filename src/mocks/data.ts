@@ -1,9 +1,8 @@
 import { Campaign, ShippingRates } from "../types";
 
 export const colorImageMap: Record<string, string> = {
-  Black:
-    "https://kith.com/cdn/shop/files/KHM034254-001-Front_125bfc94-5392-4b20-9e2b-db8b433fd562.jpg?v=1762458654&width=1440",
-  Blue: "https://kith.com/cdn/shop/files/KHM034254-413-Front_3e9654ab-b6b1-4a6f-9934-354ba1d46899.jpg?v=1762458679&width=1440",
+  Black: "/images/KITH_NEW_YORK_KNICKS_BLACK_FRONT.webp",
+  Blue: "/images/KITH_NEW_YORK_KNICKS_BLUE_FRONT.webp",
 };
 
 export const mockShippingRates: ShippingRates = {
@@ -28,13 +27,14 @@ export const mockCampaign: Campaign = {
   expectedDelivery: expectedDel.toISOString(),
   isActive: true,
   heroImages: [
-    "https://kith.com/cdn/shop/files/KHM034254-001-Front_125bfc94-5392-4b20-9e2b-db8b433fd562.jpg?v=1762458654&width=1440",
-    "https://kith.com/cdn/shop/files/Final_Mens_Knicks_Ecomm_KHM034254-001_0227_fc0d38f1-3154-4062-8045-5458e35e50cd.jpg?v=1762458654&width=1440",
-    "https://kith.com/cdn/shop/files/Final_Mens_Knicks_Ecomm_KHM034254-001_0228_d625beeb-7324-48bb-9dd3-d8dbeba433d5.jpg?v=1762458654&width=1440",
-    "https://kith.com/cdn/shop/files/KHM034254-413-Front_3e9654ab-b6b1-4a6f-9934-354ba1d46899.jpg?v=1762458679&width=1440",
-    "https://kith.com/cdn/shop/files/Final_Mens_Knicks_Ecomm_KHM034254-413_0303_a8c686c9-d760-4745-a0b3-c9b8c171101d.jpg?v=1762458679&width=1440",
-    "https://kith.com/cdn/shop/files/Final_Mens_Knicks_Ecomm_KHM034254-413_0304_b2337862-0946-494f-a738-4a01bce94fce.jpg?v=1762458679&width=1440",
+    "/images/KITH_NEW_YORK_KNICKS_BLACK_FRONT.webp",
+    "/images/KITH_NEW_YORK_KNICKS_MENS_BLACK_FRONT.webp",
+    "/images/KITH_NEW_YORK_KNICKS_MENS_BLACK_BACK.webp",
+    "/images/KITH_NEW_YORK_KNICKS_BLUE_FRONT.webp",
+    "/images/KITH_NEW_YORK_KNICKS_MENS_BLUE_FRONT.webp",
+    "/images/KITH_NEW_YORK_KNICKS_MENS_BLUE_BACK.webp",
   ],
+  sizeChart: "/images/KITH_NEW_YORK_KNICKS_SIZE_GUIDE.jpeg",
   variants: [
     {
       id: "var_kith_blk_s",

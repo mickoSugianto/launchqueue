@@ -2,12 +2,20 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import { useCampaign } from "@/lib/hooks/useCampaign";
 import { DropCountdown } from "@/components/drop/DropCountdown";
 import { toast } from "sonner";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ProductVariant } from "@/types";
 
 export default function DropPage() {
   // GRAB THE URL PARAMETERS
@@ -21,6 +29,18 @@ export default function DropPage() {
   const router = useRouter();
   const [selectedVariant, setSelectedVariant] = useState<string>("");
   const [isLocking, setIsLocking] = useState(false);
+
+  // DERIVED STATE: WATCHES THE INVENTORY OF THE CURRENTLY SELECTED VARIANT
+  const activeVariantData = campaign?.variants.find(
+    (v: ProductVariant) => v.id === selectedVariant,
+  );
+
+  const isSelectedVariantSoldOut = activeVariantData
+    ? activeVariantData.availableInventory <= 0
+    : false;
+
+  // SIZE GUIDE MODAL STATE
+  const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
 
   // THE NETWORK ACTION (THE RACE)
   const handleLockInventory = async () => {
@@ -130,12 +150,14 @@ export default function DropPage() {
 
           {/* DROPCOUNTDOWN */}
           <div className="mt-12 p-8 border border-dashed border-zinc-300 rounded-sm text-center bg-zinc-50/50">
-            <div className="bg-zinc-50 border border-zinc-200 p-2 rounded-sm flex flex-col items-center justify-center min-h-[120px]">
+            <div className="bg-zinc-50 border border-zinc-00 p-2 rounded-sm flex flex-col items-center justify-center min-h-[120px]">
               {isLive ? (
-                <div className="text-center animate-in fade-in zoom-in duration-500">
-                  <span className="inline-block w-2 h-2 p-2 rounded-full bg-green-500 animate-pulse"></span>
-                  <span className="font-bold tracking-widest uppercase text-zinc-600">
-                    {" "}
+                <div className="w-full h-full flex items-center justify-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-sm">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                  </span>
+                  <span className="text-[15px] font-bold uppercase tracking-widest text-green-700">
                     Drop is Live
                   </span>
                 </div>
@@ -157,7 +179,10 @@ export default function DropPage() {
                 <Label className="text-xs font-bold tracking-widest uppercase text-zinc-500">
                   Select Size
                 </Label>
-                <button className="text-xs font-medium underline text-zinc-400 hover:text-zinc-900">
+                <button
+                  onClick={() => setIsSizeGuideOpen(true)}
+                  className="text-xs font-medium underline text-zinc-400 hover:text-zinc-900 cursor-pointer"
+                >
                   Size Guide
                 </button>
               </div>
@@ -199,20 +224,60 @@ export default function DropPage() {
             {/* THE BOUNCER BUTTON */}
             <Button
               className="w-full h-14 text-sm font-bold tracking-widest uppercase transition-all cursor-pointer"
-              disabled={!isLive || !selectedVariant || isLocking}
+              disabled={
+                !isLive ||
+                !selectedVariant ||
+                isLocking ||
+                isSelectedVariantSoldOut
+              }
               onClick={handleLockInventory}
             >
               {!isLive
                 ? "Unlocks at Drop Time"
                 : !selectedVariant
                   ? "Select a Size"
-                  : isLocking
-                    ? "Locking Inventory..."
-                    : "Buy Now"}
+                  : isSelectedVariantSoldOut
+                    ? "Selected Size Sold Out"
+                    : isLocking
+                      ? "Locking Inventory..."
+                      : "Buy Now"}
             </Button>
           </div>
         </div>
       </main>
+      {/* SIZE GUIDE MODAL */}
+      <Dialog open={isSizeGuideOpen} onOpenChange={setIsSizeGuideOpen}>
+        <DialogContent className="sm:max-w-3xl p-0 overflow-hidden rounded-sm gap-0">
+          <DialogHeader className="p-6 pb-4 border-b border-zinc-100">
+            <DialogTitle className="text-sm font-bold uppercase tracking-widest text-zinc-900">
+              Size Guide
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-6 flex flex-col items-center">
+            {campaign?.sizeChart ? (
+              <div className="relative w-full aspect-[4/3] bg-zinc-50 rounded-sm overflow-hidden border border-zinc-100">
+                <Image
+                  src={campaign.sizeChart}
+                  alt="Brand Size Guide"
+                  fill
+                  className="object-contain"
+                  sizes="(max-width: 768px) 100vw, 400px"
+                />
+              </div>
+            ) : (
+              <div className="py-12 text-center">
+                <p className="text-sm font-medium text-zinc-500">
+                  Size guide is currently unavailable.
+                </p>
+              </div>
+            )}
+
+            <p className="text-[10px] text-zinc-400 mt-6 font-medium italic text-center uppercase tracking-widest">
+              * Fit may vary depending on the specific garment.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
