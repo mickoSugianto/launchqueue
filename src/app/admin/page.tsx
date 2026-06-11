@@ -100,7 +100,7 @@ export default function AdminDashboard() {
       {/* THE KANBAN GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
         {COLUMNS.map((col) => {
-          const colOrders = activeOrders.filter((o) => o.status === col.id);
+          const colOrders: Order[] = activeOrders.filter((o: Order) => o.status === col.id);
           const ColIcon = col.icon;
 
           return (
@@ -144,7 +144,7 @@ export default function AdminDashboard() {
                         )}
                       </div>
                       <p className="text-sm font-bold text-zinc-900">
-                        {order.customer.name}
+                        {order.customer.fullName}
                       </p>
                       <p className="text-xs text-zinc-500 font-medium">
                         {order.item?.name} • {order.item?.color} •{" "}
