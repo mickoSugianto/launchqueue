@@ -5,6 +5,7 @@ import { useCheckout } from "@/lib/hooks/useCheckout";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { CheckCircle2, Package, Truck, Home } from "lucide-react";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 // THE VALID STATES THAT ARE ALLOWED TO VIEW THIS PAGE
 const VALID_RECEIPT_STATUSES = [
@@ -78,7 +79,7 @@ export default function ReceiptPage() {
       {/* SIMPLE HEADER */}
       <header className="w-full border-b border-zinc-200 py-6 px-4 md:px-8 flex justify-center bg-white">
         <h1 className="text-sm font-bold tracking-widest uppercase">
-          LaunchQueue
+          <Link href="/">LaunchQueue</Link>
         </h1>
       </header>
       {/* MAIN */}

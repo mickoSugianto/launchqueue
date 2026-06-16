@@ -1,65 +1,132 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import Link from "next/link";
+import Image from "next/image";
+import { useCampaigns } from "@/lib/hooks/useCampaigns";
+import { ArrowRight, Activity, Terminal } from "lucide-react";
+import { cleanBrandName } from "@/lib/utils";
+
+export default function HomePage() {
+  const { campaigns, isLoading, isError } = useCampaigns();
+
+  // GATEKEEPER: LOADING
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+        <p className="text-sm font-medium tracking-widest uppercase animate-pulse text-zinc-400">
+          Initializing Engine...
+        </p>
+      </div>
+    );
+  }
+
+  // GATEKEEPER: ERROR
+  if (isError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+        <p className="text-sm font-medium tracking-widest uppercase text-red-500">
+          System Failure.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans">
+      <header className="pt-32 pb-20 px-6 max-w-5xl mx-auto text-center">
+        <div className="inline-flex items-center gap-2 px-3 py-1">
+          <Activity className="w-3 h-3 text-zinc-500" />
+          <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            System Online
+          </span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <h1 className="text-4xl md:text-6xl font-black tracking-tight mb-6">
+          LaunchQueue
+        </h1>
+        <p className="text-sm md:text-base text-zinc-500 max-w-2xl mx-auto font-medium leading-relaxed">
+          A high-concurrency pre-order and drop orchestration engine. Built to
+          demonstrate Optimistic UI, Race-Condition handling, and State
+          Synchronization.
+        </p>
+      </header>
+      <main className="max-w-5xl mx-auto px-6 pb-32">
+        <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-900 mb-8 border-b border-zinc-200 pb-4">
+          Active Campaigns
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {campaigns.map((campaign) => {
+            const cleanBrand = cleanBrandName(campaign.brandId) || "brand";
+
+            return (
+              <Link
+                key={campaign.id}
+                href={`/${cleanBrand}/${campaign.slug}`}
+                className="group flex flex-col bg-white border border-zinc-200 rounded-sm overflow-hidden hover:border-zinc-400 hover:shadow-lg transition-all duration-300"
+              >
+                <div className="relative w-full aspect-[4/5] bg-zinc-100 overflow-hidden border-b border-zinc-100">
+                  <Image
+                    src={campaign.heroImages?.[0] || ""}
+                    alt={campaign.title}
+                    fill
+                    className="object-cover transition-transform duration-700 group-hover:scale-105"
+                  />
+
+                  {campaign.isActive && (
+                    <div className="absolute top-4 right-4 flex items-center gap-2 bg-white/95 px-3 py-1.5 rounded-sm border border-zinc-100">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-900">
+                        Live
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 flex flex-col flex-grow justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 mb-2">
+                      {cleanBrand}
+                    </p>
+                    <h3 className="text-sm font-bold text-zinc-900 mb-4">
+                      {campaign.title}
+                    </h3>
+                  </div>
+                  <div className="flex items-center justify-between text-xs font-bold uppercase tracking-widest text-zinc-500 group-hover:text-zinc-900 transition-colors">
+                    <span>View Drop</span>
+                    <ArrowRight className="w-4 h-4 transform group-hover:translate-x-1 transition-transform" />
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </main>
+
+      <footer className="border-t border-zinc-200 bg-white">
+        <div className="max-w-5xl mx-auto px-6 py-12 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3 text-zinc-500">
+            <Terminal className="w-5 h-5 text-zinc-400" />
+            <div className="text-left">
+              <p className="text-xs font-bold uppercase tracking-widest text-zinc-900 mb-1">
+                Developer Portal
+              </p>
+              <p className="text-xs font-medium">
+                Access the Kanban dashboard and observe state mutations.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/admin"
+            target="_blank"
+            className="px-6 py-3 bg-zinc-900 text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-zinc-800 transition-colors"
+          >
+            Open Admin Board
+          </Link>
+        </div>
+      </footer>
     </div>
   );
 }

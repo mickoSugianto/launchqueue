@@ -31,6 +31,7 @@ export interface Campaign {
   expectedDelivery: string; // the dropDate + productionTime, ISO Date String
   isActive: boolean; // Is the drop currently live?
   heroImages: string[];
+  previewImages: Record<string, string>;
   sizeChart?: string;
   variants: ProductVariant[]; // The different sizes/colors available
 }

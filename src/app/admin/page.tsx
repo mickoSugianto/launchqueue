@@ -18,6 +18,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import Link from "next/link";
 
 // THE PRECISE STATE MACHINE FLOW
 const STATUS_FLOW: Record<string, string | null> = {
@@ -100,7 +101,9 @@ export default function AdminDashboard() {
       {/* THE KANBAN GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
         {COLUMNS.map((col) => {
-          const colOrders: Order[] = activeOrders.filter((o: Order) => o.status === col.id);
+          const colOrders: Order[] = activeOrders.filter(
+            (o: Order) => o.status === col.id,
+          );
           const ColIcon = col.icon;
 
           return (
@@ -132,7 +135,7 @@ export default function AdminDashboard() {
                     key={order.id}
                     className="bg-white p-4 border border-zinc-200 rounded-sm shadow-sm space-y-4"
                   >
-                    <div>
+                    <Link href={`/receipt/${order.id}`} target="_blank">
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-[10px] font-bold text-zinc-400 tracking-widest">
                           {order.id.split("_")[1].toUpperCase()}
@@ -150,7 +153,7 @@ export default function AdminDashboard() {
                         {order.item?.name} • {order.item?.color} •{" "}
                         {order.item?.size}
                       </p>
-                    </div>
+                    </Link>
                     {STATUS_FLOW[order.status] && (
                       <button
                         onClick={() =>

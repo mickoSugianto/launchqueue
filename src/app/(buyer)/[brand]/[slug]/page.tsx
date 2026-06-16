@@ -52,7 +52,11 @@ export default function DropPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // We pass a dummy city for now to calculate initial fake shipping
-        body: JSON.stringify({ variantId: selectedVariant, city: "Jakarta" }),
+        body: JSON.stringify({
+          slug: params.slug,
+          variantId: selectedVariant,
+          city: "Jakarta",
+        }),
       });
 
       const data = await res.json();

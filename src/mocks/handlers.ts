@@ -1,14 +1,14 @@
 import { http, HttpResponse, delay } from "msw";
-import { mockCampaign, mockShippingRates, colorImageMap } from "./data";
-import { Order, ProductVariant, OrderStatus } from "../types";
+import { mockCampaign, mockShippingRates } from "./data";
+import { Order, ProductVariant, OrderStatus, Campaign } from "../types";
 import { get } from "http";
 
 // LOCALSTORAGE
 const IS_BROWSER = typeof window !== "undefined";
 
 const globalStore = globalThis as any;
-if (!globalStore.dbCampaign) {
-  globalStore.dbCampaign = JSON.parse(JSON.stringify(mockCampaign));
+if (!globalStore.dbCampaigns) {
+  globalStore.dbCampaigns = JSON.parse(JSON.stringify([...mockCampaign]));
 }
 
 // THE SEED DATA
@@ -48,6 +48,19 @@ const defaultOrders: Order[] = [
   },
 ];
 
+const getCampaigns = (): Campaign[] => {
+  if (IS_BROWSER) {
+    const stored = localStorage.getItem("dbCampaigns");
+    if (stored) return JSON.parse(stored);
+
+    localStorage.setItem("dbCampaigns", JSON.stringify(mockCampaign));
+    return mockCampaign;
+  }
+
+  if (!globalStore.dbCampaigns) globalStore.dbCampaigns = [...mockCampaign];
+  return globalStore.dbCampaigns;
+};
+
 const getOrders = (): Order[] => {
   if (IS_BROWSER) {
     const stored = localStorage.getItem("dbOrders");
@@ -72,13 +85,22 @@ const saveOrderList = (newOrders: Order[]) => {
 };
 
 export const handlers = [
+  // HOMEPAGE: GET ALL CAMPAIGNS
+  http.get("/api/campaigns", async () => {
+    await delay(500);
+
+    return HttpResponse.json(getCampaigns());
+  }),
+
   // 1. FETCH CAMPAIGN ENDPOINT
   http.get("/api/campaigns/:slug", async ({ params }) => {
     await delay(800);
 
-    const dbCampaign = globalStore.dbCampaign;
+    const dbCampaign = globalStore.dbCampaigns.find(
+      (c: Campaign) => c.slug === params.slug,
+    );
 
-    if (params.slug !== dbCampaign.slug) {
+    if (!dbCampaign) {
       return HttpResponse.json({ message: "Not Found" }, { status: 404 });
     }
 
@@ -111,9 +133,15 @@ export const handlers = [
   http.post("/api/checkout/lock", async ({ request }) => {
     await delay(1200);
 
-    const body = (await request.json()) as { variantId: string; city: string };
+    const body = (await request.json()) as {
+      slug: string;
+      variantId: string;
+      city: string;
+    };
 
-    const dbCampaign = globalStore.dbCampaign;
+    const dbCampaign = globalStore.dbCampaigns.find(
+      (c: Campaign) => c.slug === body.slug,
+    );
     const variant = dbCampaign.variants.find(
       (v: ProductVariant) => v.id === body.variantId,
     );
@@ -123,7 +151,7 @@ export const handlers = [
       return HttpResponse.json({ error: "SOLD_OUT" }, { status: 409 });
     }
 
-    // THE TIME SECURITY CHECK (Never trust the client!)
+    // THE TIME SECURITY CHECK
     if (new Date() < new Date(dbCampaign.dropDate)) {
       return HttpResponse.json({ error: "DROP_NOT_ACTIVE" }, { status: 403 });
     }
@@ -158,7 +186,7 @@ export const handlers = [
         name: dbCampaign.title || "Kith Drop",
         color: variant.color,
         size: variant.size,
-        heroImage: colorImageMap[variant.color],
+        heroImage: dbCampaign.previewImages[variant.color],
       },
     };
 
