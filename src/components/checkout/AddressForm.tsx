@@ -42,6 +42,7 @@ export function AddressForm({
   });
 
   // WATCH THE CITY INPUT
+  // eslint-disable-next-line react-hooks/incompatible-library
   const selectedCity = watch("city");
 
   // BROADCAST IT TO THE PARENT

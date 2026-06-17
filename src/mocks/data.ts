@@ -9,7 +9,6 @@ export const mockShippingRates: ShippingRates = {
 };
 
 const soon = new Date(Date.now() + 15000);
-const tomorrow = new Date(Date.now() + 86400000);
 const expectedDel = new Date(Date.now() + 86400000 * 22);
 
 export const mockCampaign: Campaign[] = [

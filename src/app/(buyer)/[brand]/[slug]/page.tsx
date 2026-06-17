@@ -76,7 +76,7 @@ export default function DropPage() {
       // SUCCESS
       toast.success("Inventory Locked! You have 15 minutes to check out.");
       router.push(`/checkout/${data.id}`);
-    } catch (err) {
+    } catch {
       toast.error("Network error. Please try again.");
     } finally {
       setIsLocking(false);
@@ -127,7 +127,7 @@ export default function DropPage() {
               key={idx}
               className="relative aspect-[4/5] w-full bg-zinc-100 rounded-sm overflow-hidden"
             >
-              <img
+              <Image
                 src={src}
                 alt={`${campaign.title} - View ${idx + 1}`}
                 className="object-cover w-full h-full hover:scale-105 transition-transform duration-700"

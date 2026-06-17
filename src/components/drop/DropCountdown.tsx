@@ -25,6 +25,7 @@ export function DropCountdown({ dropDate, onLive }: DropCountdownProps) {
 
   // MARK AS SAFE TO RENDER
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
   }, []);
 

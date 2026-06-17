@@ -1,11 +1,11 @@
 import { http, HttpResponse, delay } from "msw";
 import { mockCampaign, mockShippingRates } from "./data";
 import { Order, ProductVariant, OrderStatus, Campaign } from "../types";
-import { get } from "http";
 
 // LOCALSTORAGE
 const IS_BROWSER = typeof window !== "undefined";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const globalStore = globalThis as any;
 if (!globalStore.dbCampaigns) {
   globalStore.dbCampaigns = JSON.parse(JSON.stringify([...mockCampaign]));
@@ -222,6 +222,7 @@ export const handlers = [
   http.post("/api/checkout/complete", async ({ request }) => {
     await delay(1500);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body = (await request.json()) as any;
     const { sessionId, shippingDetails } = body;
 

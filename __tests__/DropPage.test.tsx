@@ -19,6 +19,7 @@ jest.mock("next/navigation", () => ({
 jest.mock("next/image", () => ({
   __esModule: true,
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => {
+    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
     return <img {...props} />;
   },
 }));
@@ -56,7 +57,7 @@ describe("DropPage - Checkout Logic & Race Conditions", () => {
     const user = userEvent.setup();
 
     // mock succesful API response
-    let resolveFetch: (value: any) => void;
+    let resolveFetch: (value: unknown) => void;
     const deferredFetchPromise = new Promise((resolve) => {
       resolveFetch = resolve;
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Package,
   Truck,
@@ -205,7 +205,7 @@ export default function AdminDashboard() {
                       " ",
                     )}
                   </span>
-                  ? This action will update the customer's tracking page.
+                  ? This action will update the customer&apos;s tracking page.
                 </p>
               </div>
               <DialogFooter className="sm:justify-end border-t border-zinc-100 pt-4 mt-2">
