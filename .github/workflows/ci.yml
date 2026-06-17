@@ -1,0 +1,36 @@
+name: LaunchQueue CI/CD Pipeline
+
+# BLOCK 1: THE TRIGGERS
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+# BLOCK 2: THE ENVIRONMENT
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    # BLOCK 3: THE STEPS
+    steps:
+      - name: Grab the code from GitHub repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Clean Install NPM Dependencies
+        run: npm ci
+
+      - name: Run Next.js Linter (Catch bad code)
+        run: npm run lint
+
+      - name: Run TypeScript Compiler (Catch type errors)
+        run: npm run typecheck
+
+      - name: Run Jest & RTL Tests (The Critical User Journeys)
+        run: npm run test

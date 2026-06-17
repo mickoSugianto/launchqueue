@@ -68,13 +68,13 @@ export default function AdminDashboard() {
 
       if (!res.ok) throw new Error("Network response was not ok");
 
-      mutate();
+      mutate(); // validate
     } catch (error) {
       // ROLL BACK IF THE NETWORK FAILS
       console.error("Mutation failed, rolling back UI", error);
       alert("Failed to update order status. Rolling back.");
 
-      mutate();
+      mutate(); // validate
     }
   };
 

@@ -95,7 +95,7 @@ export default function DropPage() {
   }
 
   // HANDLE 404s OR NETWORK ERRORS
-  if (isError || !campaign) {
+  if (isError || !campaign || !campaign.isActive) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white text-zinc-950">
         <p className="text-sm font-bold tracking-widest uppercase text-red-500">
