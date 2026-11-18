@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useCampaigns } from "@/lib/hooks/useCampaigns";
 import { ArrowRight, Activity, Terminal } from "lucide-react";
-import { cleanBrandName } from "@/lib/utils";
+import { cleanBrandName, sanitizeBrandIdToSlug } from "@/lib/utils";
 
 export default function HomePage() {
   const { campaigns, isLoading, isError } = useCampaigns();
@@ -56,21 +56,27 @@ export default function HomePage() {
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {campaigns.map((campaign) => {
-            const cleanBrand = cleanBrandName(campaign.brandId) || "brand";
+            const brandSlug =
+              sanitizeBrandIdToSlug(campaign.brandId) || "brand";
+            const cleanBrand = cleanBrandName(campaign.brandId) || "BRAND";
+            const heroImage = campaign.heroImages?.[0]?.trim();
 
             return (
               <Link
                 key={campaign.id}
-                href={`/${cleanBrand}/${campaign.slug}`}
+                href={`/${brandSlug}/${campaign.slug}`}
                 className="group flex flex-col bg-white border border-zinc-200 rounded-sm overflow-hidden hover:border-zinc-400 hover:shadow-lg transition-all duration-300"
               >
                 <div className="relative w-full aspect-[4/5] bg-zinc-100 overflow-hidden border-b border-zinc-100">
-                  <Image
-                    src={campaign.heroImages?.[0] || ""}
-                    alt={campaign.title}
-                    fill
-                    className="object-cover transition-transform duration-700 group-hover:scale-105"
-                  />
+                  {heroImage ? (
+                    <Image
+                      src={heroImage}
+                      alt={campaign.title}
+                      fill
+                      sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                      className="object-cover transition-transform duration-700 group-hover:scale-105"
+                    />
+                  ) : null}
 
                   {campaign.isActive && (
                     <div className="absolute top-4 right-4 flex items-center gap-2 bg-white/95 px-3 py-1.5 rounded-sm border border-zinc-100">

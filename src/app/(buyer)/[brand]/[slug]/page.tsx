@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import { useCampaign } from "@/lib/hooks/useCampaign";
@@ -12,10 +12,12 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ProductVariant } from "@/types";
+import { cleanBrandName, sanitizeBrandIdToSlug } from "@/lib/utils";
 
 export default function DropPage() {
   // GRAB THE URL PARAMETERS
@@ -29,6 +31,8 @@ export default function DropPage() {
   const router = useRouter();
   const [selectedVariant, setSelectedVariant] = useState<string>("");
   const [isLocking, setIsLocking] = useState(false);
+
+  const handleLive = useCallback(() => setIsLive(true), []);
 
   // DERIVED STATE: WATCHES THE INVENTORY OF THE CURRENTLY SELECTED VARIANT
   const activeVariantData = campaign?.variants.find(
@@ -59,12 +63,18 @@ export default function DropPage() {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
       // THE RACE CONDITION CHECK
       if (!res.ok) {
         if (res.status === 409) {
-          toast.error("Sold Out! Someone beat you to it.");
+          if (data?.error === "MAX_PURCHASE_EXCEEDED") {
+            toast.error(
+              "Purchase limit reached. Please complete or wait for your active checkout session to expire.",
+            );
+          } else {
+            toast.error("Sold Out! Someone beat you to it.");
+          }
         } else if (res.status === 403) {
           toast.error("Nice try. The drop isn't active yet.");
         } else {
@@ -94,8 +104,13 @@ export default function DropPage() {
     );
   }
 
-  // HANDLE 404s OR NETWORK ERRORS
-  if (isError || !campaign || !campaign.isActive) {
+  // HANDLE 404s, BRAND MISMATCHES, OR NETWORK ERRORS
+  if (
+    isError ||
+    !campaign ||
+    !campaign.isActive ||
+    sanitizeBrandIdToSlug(campaign.brandId) !== params.brand
+  ) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white text-zinc-950">
         <p className="text-sm font-bold tracking-widest uppercase text-red-500">
@@ -111,7 +126,7 @@ export default function DropPage() {
       {/* Brand Header */}
       <header className="w-full border-b border-zinc-200 py-6 px-4 md:px-8 flex justify-between items-center bg-white sticky top-0 z-10">
         <h1 className="text-xl font-bold tracking-tighter uppercase italic">
-          {campaign.brandId.replace("brand_", "").replace("_official", "")}
+          {cleanBrandName(campaign.brandId)}
         </h1>
         <p className="text-xs font-medium tracking-widest text-zinc-500 uppercase">
           LaunchQueue Active
@@ -122,7 +137,7 @@ export default function DropPage() {
       <main className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 items-start min-h-[calc(100vh-80px)]">
         {/* Left Column: Hero Gallery */}
         <div className="border-r border-zinc-200 p-4 md:p-12 flex flex-col gap-6">
-          {campaign.heroImages.map((src, idx) => (
+          {campaign.heroImages.filter(Boolean).map((src, idx) => (
             <div
               key={idx}
               className="relative aspect-[4/5] w-full bg-zinc-100 rounded-sm overflow-hidden"
@@ -130,7 +145,10 @@ export default function DropPage() {
               <Image
                 src={src}
                 alt={`${campaign.title} - View ${idx + 1}`}
-                className="object-cover w-full h-full hover:scale-105 transition-transform duration-700"
+                fill
+                sizes="(max-width: 768px) 100vw, 50vw"
+                priority={idx === 0}
+                className="object-cover hover:scale-105 transition-transform duration-700"
               />
             </div>
           ))}
@@ -147,14 +165,15 @@ export default function DropPage() {
                 Ships in {campaign.productionTime} days
               </span>
               <span>
-                Strict limit: {campaign.variants[0].maxPurchase} per customer
+                Strict limit: {campaign.variants[0]?.maxPurchase ?? 1} per
+                customer
               </span>
             </div>
           </div>
 
           {/* DROPCOUNTDOWN */}
           <div className="mt-12 p-8 border border-dashed border-zinc-300 rounded-sm text-center bg-zinc-50/50">
-            <div className="bg-zinc-50 border border-zinc-00 p-2 rounded-sm flex flex-col items-center justify-center min-h-[120px]">
+            <div className="bg-zinc-50 border border-zinc-200 p-2 rounded-sm flex flex-col items-center justify-center min-h-[120px]">
               {isLive ? (
                 <div className="w-full h-full flex items-center justify-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-sm">
                   <span className="relative flex h-2 w-2">
@@ -172,7 +191,7 @@ export default function DropPage() {
                   </span>
                   <DropCountdown
                     dropDate={campaign.dropDate}
-                    onLive={() => setIsLive(true)}
+                    onLive={handleLive}
                   />
                 </div>
               )}
@@ -206,7 +225,7 @@ export default function DropPage() {
                       />
                       <Label
                         htmlFor={variant.id}
-                        className="flex flex-col items-center justify-center rounded-sm border-2 border-zinc-200 bg-white pd-4 hover:bg-zinc-200 peer-data-[state=checked]:border-zinc-900 peer-data-[state=checked]:bg-zinc-900 peer-data-[state=checked]:text-white peer-data-[state=checked]:hover:bg-zinc-800 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 transition-all"
+                        className="flex flex-col items-center justify-center rounded-sm border-2 border-zinc-200 bg-white p-4 hover:bg-zinc-200 peer-data-[state=checked]:border-zinc-900 peer-data-[state=checked]:bg-zinc-900 peer-data-[state=checked]:text-white peer-data-[state=checked]:hover:bg-zinc-800 cursor-pointer peer-disabled:cursor-not-allowed peer-disabled:opacity-50 transition-all"
                       >
                         <span className="text-lg font-bold">
                           {variant.color}
@@ -256,6 +275,9 @@ export default function DropPage() {
             <DialogTitle className="text-sm font-bold uppercase tracking-widest text-zinc-900">
               Size Guide
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Garment measurement chart for {campaign.title}.
+            </DialogDescription>
           </DialogHeader>
           <div className="p-6 flex flex-col items-center">
             {campaign?.sizeChart ? (

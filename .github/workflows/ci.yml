@@ -34,3 +34,6 @@ jobs:
 
       - name: Run Jest & RTL Tests (The Critical User Journeys)
         run: npm run test
+
+      - name: Run Next.js Production Build
+        run: npm run build

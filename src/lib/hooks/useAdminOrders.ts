@@ -1,7 +1,11 @@
 import useSWR from "swr";
 import { Order } from "@/types";
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const fetcher = (url: string) =>
+  fetch(url).then((res) => {
+    if (!res.ok) throw new Error("Failed to fetch orders");
+    return res.json();
+  });
 
 export function useAdminOrders() {
   const { data, mutate, error, isLoading } = useSWR(

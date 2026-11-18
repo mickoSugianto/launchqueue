@@ -9,7 +9,7 @@ const fetcher = (url: string) =>
   });
 
 export function useCheckout(sessionId: string) {
-  const { data, error, isLoading } = useSWR(
+  const { data, error, isLoading, mutate } = useSWR(
     sessionId ? `/api/checkout/${sessionId}` : null,
     fetcher,
     { refreshInterval: 3000, revalidateOnFocus: false },
@@ -19,5 +19,6 @@ export function useCheckout(sessionId: string) {
     order: data,
     isLoading,
     isError: error,
+    mutate,
   };
 }

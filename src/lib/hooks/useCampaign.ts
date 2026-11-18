@@ -9,7 +9,7 @@ const fetcher = (url: string) =>
 
 export function useCampaign(slug: string) {
   const { data, error, isLoading } = useSWR<Campaign>(
-    `/api/campaigns/${slug}`,
+    slug ? `/api/campaigns/${slug}` : null,
     fetcher,
     { refreshInterval: 5000, revalidateOnFocus: true },
   );

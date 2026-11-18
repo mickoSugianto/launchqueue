@@ -3,32 +3,71 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { SUPPORTED_CITIES } from "@/lib/constants";
 
-// THE ZOD SCHEMA: STRICT VALIDATION RULES
-const checkoutSchema = z.object({
-  fullName: z.string().min(3, "Full name must be at least 3 characters"),
-  email: z.string().email("Invalid email address"),
-  whatsapp: z.string().min(10, "Whatsapp number must be at least 10 digits"),
-  shippingAddress: z.string().min(10, "Please enter your full street address"),
-  city: z.enum(["Jakarta", "Bandung", "Surabaya", "Bali", "Medan"], {
-    message: "Please select a valid shipping destination",
-  }),
-  postalCode: z.string().min(5, "Postal code must be at least 5 digits"),
-});
-
-// INFER THE TYPESCRIPT TYPE DIRECTLY FROM THE ZOD SCHEMA
-type CheckoutFormData = z.infer<typeof checkoutSchema>;
+interface CheckoutFormData {
+  fullName: string;
+  email: string;
+  whatsapp: string;
+  shippingAddress: string;
+  city: string;
+  postalCode: string;
+}
 
 export function AddressForm({
   sessionId,
   onCityChange,
+  availableCities,
+  onExpire,
 }: {
   sessionId: string;
   onCityChange: (city: string) => void;
+  availableCities?: string[];
+  onExpire?: () => void;
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const cities = useMemo(
+    () =>
+      availableCities && availableCities.length > 0
+        ? availableCities
+        : [...SUPPORTED_CITIES],
+    [availableCities],
+  );
+
+  // THE ZOD SCHEMA: STRICT VALIDATION RULES
+  const checkoutSchema = useMemo(
+    () =>
+      z.object({
+        fullName: z
+          .string()
+          .trim()
+          .min(3, "Full name must be at least 3 characters"),
+        email: z.string().trim().email("Invalid email address"),
+        whatsapp: z
+          .string()
+          .trim()
+          .regex(
+            /^\+?[0-9]{10,15}$/,
+            "Enter a valid 10-15 digit phone number",
+          ),
+        shippingAddress: z
+          .string()
+          .trim()
+          .min(10, "Please enter your full street address"),
+        city: z.string().refine((val) => cities.includes(val), {
+          message: "Please select a valid shipping destination",
+        }),
+        postalCode: z
+          .string()
+          .trim()
+          .regex(/^[0-9]{5}$/, "Postal code must be 5 digits"),
+      }),
+    [cities],
+  );
 
   // INITIALIZE REACT HOOK FORM
   const {
@@ -47,9 +86,7 @@ export function AddressForm({
 
   // BROADCAST IT TO THE PARENT
   useEffect(() => {
-    if (selectedCity) {
-      onCityChange(selectedCity);
-    }
+    onCityChange(selectedCity || "");
   }, [selectedCity, onCityChange]);
 
   // THE SUBMIT HANDLER
@@ -69,19 +106,35 @@ export function AddressForm({
         body: JSON.stringify(payload),
       });
 
-      const responseData = await res.json();
+      const responseData = await res.json().catch(() => null);
 
       if (!res.ok) {
-        // IF THE TIMER EXPIRED, THE BACKEND KICKS THEM OUT
-        alert(responseData.error || "Checkout failed.");
-        router.push("/");
+        if (res.status === 409 && responseData?.receiptUrl) {
+          toast.error("Order already completed. Redirecting to receipt...");
+          router.replace(responseData.receiptUrl);
+          return;
+        }
+
+        if (res.status === 410) {
+          toast.error(responseData?.error || "Checkout session expired.");
+          if (onExpire) {
+            onExpire();
+          } else {
+            router.push("/");
+          }
+          return;
+        }
+
+        toast.error(
+          responseData?.error || "Checkout failed. Please try again.",
+        );
         return;
       }
 
       // SUCCESS!!
       router.push(responseData.receiptUrl);
-    } catch (error) {
-      console.error("Network Error:", error);
+    } catch {
+      toast.error("Network error. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -186,11 +239,11 @@ export function AddressForm({
             className={`w-full p-3 border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 bg-white cursor-pointer ${errors.city ? "border-red-500 bg-red-50" : "border-zinc-300"}`}
           >
             <option value="">Select your city...</option>
-            <option value="Jakarta">Jakarta</option>
-            <option value="Bandung">Bandung</option>
-            <option value="Surabaya">Surabaya</option>
-            <option value="Bali">Bali</option>
-            <option value="Medan">Medan</option>
+            {cities.map((city) => (
+              <option key={city} value={city}>
+                {city}
+              </option>
+            ))}
           </select>
           {errors.city && (
             <p className="text-xs text-red-500 font-medium">

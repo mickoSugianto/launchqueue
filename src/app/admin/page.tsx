@@ -9,24 +9,19 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react";
-import { Order } from "@/types";
+import { toast } from "sonner";
+import { Order, OrderStatus } from "@/types";
 import { useAdminOrders } from "@/lib/hooks/useAdminOrders";
+import { ORDER_STATUS_FLOW, formatOrderDisplayCode } from "@/lib/constants";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
 import Link from "next/link";
-
-// THE PRECISE STATE MACHINE FLOW
-const STATUS_FLOW: Record<string, string | null> = {
-  PAYMENT_VERIFIED: "IN_PRODUCTION",
-  IN_PRODUCTION: "READY_TO_SHIP",
-  READY_TO_SHIP: "SHIPPED",
-  SHIPPED: null,
-};
 
 const COLUMNS = [
   { id: "PAYMENT_VERIFIED", title: "New Orders", icon: CheckCircle2 },
@@ -36,24 +31,28 @@ const COLUMNS = [
 ];
 
 export default function AdminDashboard() {
-  const { rawOrders, activeOrders, mutate, isLoading } = useAdminOrders();
+  const { rawOrders, activeOrders, mutate, isLoading, isError } =
+    useAdminOrders();
 
   // STATE TO TRACK WHICH ORDER THE ADMIN CLICKED "ADVANCE" ON (MODAL)
   const [pendingOrder, setPendingOrder] = useState<{
     id: string;
-    currentStatus: string;
+    currentStatus: OrderStatus;
   } | null>(null);
 
   // THE OPTIMISTIC UI MUTATION
-  const advanceOrderStatus = async (orderId: string, currentStatus: string) => {
-    const nextStatus = STATUS_FLOW[currentStatus];
+  const advanceOrderStatus = async (
+    orderId: string,
+    currentStatus: OrderStatus,
+  ) => {
+    const nextStatus = ORDER_STATUS_FLOW[currentStatus];
     if (!nextStatus) return;
 
     // INSTANT MODAL DISMISSAL
     setPendingOrder(null);
 
     // OPTIMISTIC UI
-    const optimisticData = rawOrders.map((o: Order) =>
+    const optimisticData = (rawOrders ?? []).map((o: Order) =>
       o.id === orderId ? { ...o, status: nextStatus } : o,
     );
     mutate(optimisticData, false);
@@ -72,7 +71,7 @@ export default function AdminDashboard() {
     } catch (error) {
       // ROLL BACK IF THE NETWORK FAILS
       console.error("Mutation failed, rolling back UI", error);
-      alert("Failed to update order status. Rolling back.");
+      toast.error("Failed to update order status. Rolling back.");
 
       mutate(); // validate
     }
@@ -82,6 +81,16 @@ export default function AdminDashboard() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-50">
         <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+        <p className="text-sm font-bold tracking-widest uppercase text-red-500">
+          Failed to load fulfillment pipeline.
+        </p>
       </div>
     );
   }
@@ -138,7 +147,7 @@ export default function AdminDashboard() {
                     <Link href={`/receipt/${order.id}`} target="_blank">
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-[10px] font-bold text-zinc-400 tracking-widest">
-                          {order.id.split("_")[1].toUpperCase()}
+                          {formatOrderDisplayCode(order.id)}
                         </span>
                         {order.status === "SHIPPED" ? (
                           <CheckCircle2 className="w-3 h-3 text-green-500" />
@@ -154,7 +163,7 @@ export default function AdminDashboard() {
                         {order.item?.size}
                       </p>
                     </Link>
-                    {STATUS_FLOW[order.status] && (
+                    {ORDER_STATUS_FLOW[order.status] && (
                       <button
                         onClick={() =>
                           setPendingOrder({
@@ -190,17 +199,20 @@ export default function AdminDashboard() {
               </div>
               Confirm Advancement
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Confirm advancing order status in the fulfillment pipeline.
+            </DialogDescription>
           </DialogHeader>
           {pendingOrder && (
             <>
               <div className="py-2">
                 <p className="text-xs text-zinc-500 font-medium mb-3">
-                  Order {pendingOrder.id.split("_")[1].toUpperCase()}
+                  Order {formatOrderDisplayCode(pendingOrder.id)}
                 </p>
                 <p className="text-sm text-zinc-600 font-medium">
                   Are you sure you want to move this order to{" "}
                   <span className="font-bold text-zinc-900">
-                    {STATUS_FLOW[pendingOrder.currentStatus]?.replace(
+                    {ORDER_STATUS_FLOW[pendingOrder.currentStatus]?.replace(
                       /_/g,
                       " ",
                     )}

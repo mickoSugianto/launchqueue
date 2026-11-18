@@ -6,7 +6,7 @@ import { ShieldCheck } from "lucide-react"; // shadcn uses lucide-react for icon
 import { CheckoutTimer } from "@/components/checkout/CheckoutTimer";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { AddressForm } from "@/components/checkout/AddressForm";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ShippingRates } from "@/types";
 
 export default function CheckoutPage() {
@@ -14,18 +14,41 @@ export default function CheckoutPage() {
   const router = useRouter();
 
   // FETCH THE ORDER
-  const { order, isLoading, isError } = useCheckout(params.sessionId);
+  const { order, isLoading, isError, mutate } = useCheckout(params.sessionId);
 
-  // STATES FOR SHIPPING RATES AND SELECTED CITY
+  // STATES FOR SHIPPING RATES, SELECTED CITY, AND LOCAL EXPIRY
   const [rates, setRates] = useState<ShippingRates>({});
   const [dynamicCity, setDynamicCity] = useState<string>("");
+  const [hasTimedOut, setHasTimedOut] = useState(false);
+
+  const handleTimerExpire = useCallback(() => {
+    setHasTimedOut(true);
+    void mutate();
+  }, [mutate]);
 
   // FETCH THE RATES
   useEffect(() => {
     fetch("/api/shipping-rates")
-      .then((res) => res.json())
-      .then((data) => setRates(data));
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load shipping rates");
+        return res.json();
+      })
+      .then((data) => setRates(data))
+      .catch((err) => {
+        console.warn("Unable to fetch shipping rates, using fallback:", err);
+      });
   }, []);
+
+  // REDIRECT COMPLETED ORDERS TO RECEIPT
+  useEffect(() => {
+    if (
+      order &&
+      order.status !== "AWAITING_PAYMENT" &&
+      order.status !== "EXPIRED"
+    ) {
+      router.replace(`/receipt/${order.id}`);
+    }
+  }, [order, router]);
 
   // CALCULATE THE DYNAMIC FEE
   const dynamicShippingFee =
@@ -45,7 +68,7 @@ export default function CheckoutPage() {
   }
 
   // INVALID OR EXPIRED SESSION
-  if (isError || !order) {
+  if (isError || !order || order.status === "EXPIRED" || hasTimedOut) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 space-y-4">
         <p className="text-sm font-bold tracking-widest uppercase text-red-500">
@@ -53,13 +76,26 @@ export default function CheckoutPage() {
         </p>
         <button
           onClick={() => router.push("/")}
-          className="text-xs font-medium underline text-zinc-500 hover:text-zinc-900"
+          className="text-xs font-medium underline text-zinc-500 hover:text-zinc-900 cursor-pointer"
         >
           Return to Lobby
         </button>
       </div>
     );
   }
+
+  // ALREADY COMPLETED / PAID ORDER REDIRECT
+  if (order.status !== "AWAITING_PAYMENT") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+        <p className="text-sm font-medium tracking-widest uppercase animate-pulse text-zinc-400">
+          Redirecting to Receipt...
+        </p>
+      </div>
+    );
+  }
+
+  const availableCities = Object.keys(rates);
 
   // THE SECURE CHECKOUT LAYOUT
   return (
@@ -85,11 +121,21 @@ export default function CheckoutPage() {
               Please enter your destination address.
             </p>
           </div>
-          <AddressForm sessionId={order.id} onCityChange={setDynamicCity} />
+          <AddressForm
+            sessionId={order.id}
+            onCityChange={setDynamicCity}
+            availableCities={
+              availableCities.length > 0 ? availableCities : undefined
+            }
+            onExpire={handleTimerExpire}
+          />
         </div>
         {/* RIGHT COLUMN: THE LEDGER / SUMMARY (40%) */}
         <div className="lg:col-span-5 space-y-6 lg:sticky lg:top-8">
-          <CheckoutTimer expiresAt={order.expiresAt} />
+          <CheckoutTimer
+            expiresAt={order.expiresAt}
+            onExpire={handleTimerExpire}
+          />
           <OrderSummary order={order} dynamicShippingFee={dynamicShippingFee} />
         </div>
       </main>

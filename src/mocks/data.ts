@@ -9,7 +9,8 @@ export const mockShippingRates: ShippingRates = {
 };
 
 const soon = new Date(Date.now() + 15000);
-const expectedDel = new Date(Date.now() + 86400000 * 22);
+const getExpectedDelivery = (productionTimeDays: number) =>
+  new Date(soon.getTime() + productionTimeDays * 86400000).toISOString();
 
 export const mockCampaign: Campaign[] = [
   {
@@ -19,7 +20,7 @@ export const mockCampaign: Campaign[] = [
     slug: "knicks-hoodie",
     dropDate: soon.toISOString(),
     productionTime: 21,
-    expectedDelivery: expectedDel.toISOString(),
+    expectedDelivery: getExpectedDelivery(21),
     isActive: true,
     heroImages: [
       "/images/KITH_NEW_YORK_KNICKS_BLACK_FRONT.webp",
@@ -110,7 +111,7 @@ export const mockCampaign: Campaign[] = [
     slug: "relaxed-fear-of-good-tee",
     dropDate: soon.toISOString(),
     productionTime: 14,
-    expectedDelivery: expectedDel.toISOString(),
+    expectedDelivery: getExpectedDelivery(14),
     isActive: true,
     heroImages: [
       "/images/FEAR_OF_GOD_RELAXED_LONG_SLEEVE_TEE_FRONT.webp",
