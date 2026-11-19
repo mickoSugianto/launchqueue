@@ -3,32 +3,77 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { mutate as globalMutate } from "swr";
+import { ChevronDown } from "lucide-react";
+import { toast } from "sonner";
+import { SUPPORTED_CITIES } from "@/lib/constants";
+import { apiFetch } from "@/lib/apiFetch";
+import type { Order } from "@/types";
 
-// THE ZOD SCHEMA: STRICT VALIDATION RULES
-const checkoutSchema = z.object({
-  fullName: z.string().min(3, "Full name must be at least 3 characters"),
-  email: z.string().email("Invalid email address"),
-  whatsapp: z.string().min(10, "Whatsapp number must be at least 10 digits"),
-  shippingAddress: z.string().min(10, "Please enter your full street address"),
-  city: z.enum(["Jakarta", "Bandung", "Surabaya", "Bali", "Medan"], {
-    message: "Please select a valid shipping destination",
-  }),
-  postalCode: z.string().min(5, "Postal code must be at least 5 digits"),
-});
-
-// INFER THE TYPESCRIPT TYPE DIRECTLY FROM THE ZOD SCHEMA
-type CheckoutFormData = z.infer<typeof checkoutSchema>;
+interface CheckoutFormData {
+  fullName: string;
+  email: string;
+  whatsapp: string;
+  shippingAddress: string;
+  city: string;
+  postalCode: string;
+}
 
 export function AddressForm({
   sessionId,
   onCityChange,
+  availableCities,
+  onExpire,
+  onComplete,
 }: {
   sessionId: string;
   onCityChange: (city: string) => void;
+  availableCities?: string[];
+  onExpire?: () => void;
+  onComplete?: () => void;
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const cities = useMemo(
+    () =>
+      availableCities && availableCities.length > 0
+        ? availableCities
+        : [...SUPPORTED_CITIES],
+    [availableCities],
+  );
+
+  // THE ZOD SCHEMA: STRICT VALIDATION RULES
+  const checkoutSchema = useMemo(
+    () =>
+      z.object({
+        fullName: z
+          .string()
+          .trim()
+          .min(3, "Full name must be at least 3 characters"),
+        email: z.string().trim().email("Invalid email address"),
+        whatsapp: z
+          .string()
+          .trim()
+          .regex(
+            /^\+?[0-9]{10,15}$/,
+            "Enter a valid 10-15 digit phone number",
+          ),
+        shippingAddress: z
+          .string()
+          .trim()
+          .min(10, "Please enter your full street address"),
+        city: z.string().refine((val) => cities.includes(val), {
+          message: "Please select a valid shipping destination",
+        }),
+        postalCode: z
+          .string()
+          .trim()
+          .regex(/^[0-9]{5}$/, "Postal code must be 5 digits"),
+      }),
+    [cities],
+  );
 
   // INITIALIZE REACT HOOK FORM
   const {
@@ -47,15 +92,25 @@ export function AddressForm({
 
   // BROADCAST IT TO THE PARENT
   useEffect(() => {
-    if (selectedCity) {
-      onCityChange(selectedCity);
-    }
+    onCityChange(selectedCity || "");
   }, [selectedCity, onCityChange]);
 
   // THE SUBMIT HANDLER
   const router = useRouter();
+
+  const syncCompletedOrderCache = async (updatedOrder?: Order) => {
+    const checkoutKey = `/api/checkout/${sessionId}`;
+    if (updatedOrder) {
+      await globalMutate(checkoutKey, updatedOrder, { revalidate: false });
+    } else {
+      await globalMutate(checkoutKey);
+    }
+    void globalMutate("/api/checkout/active");
+  };
+
   const processCheckout = async (data: CheckoutFormData) => {
     setIsSubmitting(true);
+    let didRedirect = false;
 
     try {
       const payload = {
@@ -63,27 +118,60 @@ export function AddressForm({
         shippingDetails: data,
       };
 
-      const res = await fetch("/api/checkout/complete", {
+      const res = await apiFetch("/api/checkout/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const responseData = await res.json();
+      const responseData = (await res.json().catch(() => null)) as {
+        receiptUrl?: string;
+        error?: string;
+        order?: Order;
+      } | null;
 
       if (!res.ok) {
-        // IF THE TIMER EXPIRED, THE BACKEND KICKS THEM OUT
-        alert(responseData.error || "Checkout failed.");
-        router.push("/");
+        if (res.status === 409 && responseData?.receiptUrl) {
+          didRedirect = true;
+          onComplete?.();
+          await syncCompletedOrderCache(responseData.order);
+          toast.error("Order already completed. Redirecting to receipt...");
+          router.replace(responseData.receiptUrl);
+          return;
+        }
+
+        if (res.status === 410) {
+          toast.error(responseData?.error || "Checkout session expired.");
+          if (onExpire) {
+            onExpire();
+          } else {
+            router.push("/");
+          }
+          return;
+        }
+
+        toast.error(
+          responseData?.error || "Checkout failed. Please try again.",
+        );
         return;
       }
 
       // SUCCESS!!
+      if (!responseData?.receiptUrl) {
+        toast.error("Checkout failed. Please try again.");
+        return;
+      }
+
+      didRedirect = true;
+      onComplete?.();
+      await syncCompletedOrderCache(responseData.order);
       router.push(responseData.receiptUrl);
-    } catch (error) {
-      console.error("Network Error:", error);
+    } catch {
+      toast.error("Network error. Please try again.");
     } finally {
-      setIsSubmitting(false);
+      if (!didRedirect) {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -180,18 +268,21 @@ export function AddressForm({
           >
             City
           </label>
-          <select
-            id="city"
-            {...register("city")}
-            className={`w-full p-3 border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 bg-white cursor-pointer ${errors.city ? "border-red-500 bg-red-50" : "border-zinc-300"}`}
-          >
-            <option value="">Select your city...</option>
-            <option value="Jakarta">Jakarta</option>
-            <option value="Bandung">Bandung</option>
-            <option value="Surabaya">Surabaya</option>
-            <option value="Bali">Bali</option>
-            <option value="Medan">Medan</option>
-          </select>
+          <div className="relative">
+            <select
+              id="city"
+              {...register("city")}
+              className={`w-full p-3 pr-10 appearance-none border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 cursor-pointer ${errors.city ? "border-red-500 bg-red-50" : "border-zinc-300 bg-zinc-50"}`}
+            >
+              <option value="">Select your city...</option>
+              {cities.map((city) => (
+                <option key={city} value={city}>
+                  {city}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          </div>
           {errors.city && (
             <p className="text-xs text-red-500 font-medium">
               {errors.city.message}

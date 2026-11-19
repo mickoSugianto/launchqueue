@@ -4,7 +4,8 @@ export type OrderStatus =
   | "IN_PRODUCTION"
   | "READY_TO_SHIP"
   | "SHIPPED"
-  | "EXPIRED"; // User didn't pay in 15 minutes, inventory released
+  | "EXPIRED" // User didn't pay in 15 minutes, inventory released
+  | "CANCELLED"; // User abandoned checkout or 3-minute grace window elapsed
 
 export type ShippingRates = Record<string, number>;
 
@@ -65,6 +66,7 @@ export interface Order {
 
   lockedAt: string; // ISO Date String: The exact millisecond they entered checkout
   expiresAt: string; // ISO Date String: exactly 15 minutes after lockedAt
+  leftAt?: string | null; // ISO Date String: when user left checkout without completing or cancelling
 
   customer: Customer;
 

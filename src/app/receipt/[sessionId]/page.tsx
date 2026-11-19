@@ -29,12 +29,26 @@ export default function ReceiptPage() {
 
   const params = useParams<{ sessionId: string }>();
   const router = useRouter();
+  const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
 
   // FETCH THE HYDRATED ORDER
-  const { order, isLoading, isError } = useCheckout(params.sessionId);
+  const { order, isLoading, isValidating, isError } = useCheckout(
+    params.sessionId,
+  );
+
+  if (!isLoading && !isValidating && settledSessionId !== params.sessionId) {
+    setSettledSessionId(params.sessionId);
+  }
+
+  // HOLD IN LOADING STATE ONLY WHILE INITIAL MOUNT REVALIDATION IS IN FLIGHT FOR STALE PRE-PAYMENT CACHE
+  const isRevalidatingStaleOrder =
+    !isError &&
+    Boolean(isValidating) &&
+    settledSessionId !== params.sessionId &&
+    (!order || !VALID_RECEIPT_STATUSES.includes(order.status));
 
   // GATEKEEPER: LOADING
-  if (isLoading) {
+  if (isLoading || isRevalidatingStaleOrder) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-50">
         <p className="text-sm font-medium tracking-widest uppercase animate-pulse text-zinc-400">

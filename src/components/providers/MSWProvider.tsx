@@ -1,26 +1,128 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { mutate } from "swr";
+import { ensureMswActive } from "@/lib/apiFetch";
 
 export function MSWProvider({ children }: { children: React.ReactNode }) {
   const [mswReady, setMswReady] = useState(false);
+  const [mswError, setMswError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const pathname = usePathname();
 
   useEffect(() => {
-    const init = async () => {
-      // DYNAMICALLY IMPORT THE WORKER SO IT NEVER RUNS ON THE SERVER
-      const { worker } = await import("@/mocks/browser");
-
-      await worker.start({
-        onUnhandledRequest: "bypass", // IGNORE NEXT.JS INTERNAL NETWORK TRAFFIC
-      });
-
-      setMswReady(true);
-    };
-    // EDGE CASE: MAKE SURE IT DOESN'T RUN ON THE SERVER
-    if (typeof window !== "undefined") {
-      init();
+    if (typeof window === "undefined") return;
+    if (pathname && !pathname.startsWith("/checkout/")) {
+      try {
+        sessionStorage.setItem("lq:hasPriorRoute", "1");
+      } catch {
+        // Ignore sessionStorage errors
+      }
     }
-  }, []);
+  }, [pathname]);
+
+  useEffect(() => {
+    // EDGE CASE: MAKE SURE IT DOESN'T RUN ON THE SERVER
+    if (typeof window === "undefined") return;
+
+    let cancelled = false;
+
+    const startMsw = async () => {
+      try {
+        // DYNAMICALLY IMPORT THE WORKER SO IT NEVER RUNS ON THE SERVER
+        const { worker } = await import("@/mocks/browser");
+
+        await worker.start({
+          onUnhandledRequest: "bypass", // IGNORE NEXT.JS INTERNAL NETWORK TRAFFIC
+        });
+
+        if (!cancelled) {
+          setMswError(null);
+          setMswReady(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMswError(
+            error instanceof Error
+              ? error.message
+              : "Failed to initialize mock service worker.",
+          );
+        }
+      }
+    };
+
+    void startMsw();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [retryCount]);
+
+  useEffect(() => {
+    if (!mswReady || typeof window === "undefined") return;
+
+    let cancelled = false;
+
+    const handleWake = () => {
+      void ensureMswActive()
+        .then((reactivated) => {
+          if (reactivated && !cancelled) {
+            void mutate(
+              (key) => typeof key === "string" && key.startsWith("/api/"),
+            );
+          }
+        })
+        .catch(() => {
+          // Reactive retry in apiFetch handles individual requests if wake check fails
+        });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleWake();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWake);
+    window.addEventListener("online", handleWake);
+
+    const sw =
+      typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
+    sw?.addEventListener("controllerchange", handleWake);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWake);
+      window.removeEventListener("online", handleWake);
+      sw?.removeEventListener("controllerchange", handleWake);
+    };
+  }, [mswReady]);
+
+  if (mswError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white text-zinc-950 p-4">
+        <div className="max-w-sm w-full border border-zinc-200 rounded-sm p-6 text-center space-y-4">
+          <p className="text-xs font-bold tracking-widest uppercase text-red-500">
+            Engine Initialization Failed
+          </p>
+          <p className="text-xs text-zinc-500 font-medium">{mswError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setMswError(null);
+              setRetryCount((prev) => prev + 1);
+            }}
+            className="px-4 py-2 bg-zinc-900 text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-zinc-800 transition-colors cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // WAIT FOR THE BOUNCER TO BE AT THE DOOR BEFORE LETTING USERS INTO THE APP
   if (!mswReady) {

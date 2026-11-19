@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AdminDashboard from "@/app/admin/page";
 import { useAdminOrders } from "@/lib/hooks/useAdminOrders";
+import { toast } from "sonner";
 
 // MOCKS
 // MOCK THE DATA HOOK
@@ -45,12 +46,18 @@ describe("Admin Dashboard = Kanban Flow & Optimistic Mutations", () => {
       activeOrders: [mockOrderBase],
       mutate: mockMutate,
       isLoading: false,
+      isError: false,
     });
   });
 
   // TEST 1: THE SMOKE TEST
   it("renders the kanban board and maps orders to the correct columns", () => {
     render(<AdminDashboard />);
+
+    // Check header home link
+    expect(
+      screen.getByRole("link", { name: /← LaunchQueue/i }),
+    ).toHaveAttribute("href", "/");
 
     // Check the order details (fullName, item.name)
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
@@ -140,5 +147,150 @@ describe("Admin Dashboard = Kanban Flow & Optimistic Mutations", () => {
         screen.queryByRole("heading", { name: /Confirm Advancement/i }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  // TEST 4: ROLLBACK ON FAILED PATCH
+  it("rolls back via toast.error and mutate() when PATCH fails", async () => {
+    const user = userEvent.setup();
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+    });
+
+    try {
+      render(<AdminDashboard />);
+
+      await user.click(screen.getByRole("button", { name: /Advance/i }));
+      const confirmBtn = await screen.findByRole("button", {
+        name: /Confirm/i,
+      });
+      await user.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(
+          "Failed to update order status. Rolling back.",
+        );
+      });
+
+      expect(mockMutate).toHaveBeenNthCalledWith(
+        1,
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "ord_admin_123",
+            status: "IN_PRODUCTION",
+          }),
+        ]),
+        false,
+      );
+      expect(mockMutate).toHaveBeenNthCalledWith(2);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  // TEST 5: ERROR SCREEN
+  it("renders error screen with Retry button when useAdminOrders fails", async () => {
+    const user = userEvent.setup();
+
+    (useAdminOrders as jest.Mock).mockReturnValue({
+      rawOrders: undefined,
+      activeOrders: [],
+      mutate: mockMutate,
+      isLoading: false,
+      isError: true,
+    });
+
+    render(<AdminDashboard />);
+
+    expect(
+      screen.getByText("Failed to load fulfillment pipeline."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Retry/i }));
+    expect(mockMutate).toHaveBeenCalledTimes(1);
+  });
+
+  // TEST 6: SAFE ORDER DISPLAY CODE FORMATTING
+  it("formats single and multi-underscore order IDs safely", () => {
+    const orders = [
+      { ...mockOrderBase, id: "ord_admin_123" },
+      { ...mockOrderBase, id: "debug_123" },
+      { ...mockOrderBase, id: "singleid" },
+    ];
+
+    (useAdminOrders as jest.Mock).mockReturnValue({
+      rawOrders: orders,
+      activeOrders: orders,
+      mutate: mockMutate,
+      isLoading: false,
+      isError: false,
+    });
+
+    render(<AdminDashboard />);
+
+    expect(screen.getByText("ADMIN_123")).toBeInTheDocument();
+    expect(screen.getByText("123")).toBeInTheDocument();
+    expect(screen.getByText("SINGLEID")).toBeInTheDocument();
+  });
+
+  // TEST 7: ZERO RADIX DIALOG WARNINGS
+  it("opens the Confirm Advancement modal without console warnings", async () => {
+    const user = userEvent.setup();
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      render(<AdminDashboard />);
+
+      await user.click(screen.getByRole("button", { name: /Advance/i }));
+      expect(
+        await screen.findByRole("heading", { name: /Confirm Advancement/i }),
+      ).toBeInTheDocument();
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("useAdminOrders excludes AWAITING_PAYMENT, EXPIRED, and CANCELLED orders", async () => {
+    const { SWRConfig } = jest.requireActual("swr");
+    const actualHook = jest.requireActual(
+      "@/lib/hooks/useAdminOrders",
+    ) as typeof import("@/lib/hooks/useAdminOrders");
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        { ...mockOrderBase, id: "ord_paid", status: "PAYMENT_VERIFIED" },
+        { ...mockOrderBase, id: "ord_awaiting", status: "AWAITING_PAYMENT" },
+        { ...mockOrderBase, id: "ord_expired", status: "EXPIRED" },
+        { ...mockOrderBase, id: "ord_cancelled", status: "CANCELLED" },
+      ],
+    });
+
+    function Probe() {
+      const { activeOrders, isLoading } = actualHook.useAdminOrders();
+      if (isLoading) return <div>loading</div>;
+      return (
+        <div data-testid="active-ids">
+          {activeOrders.map((o: { id: string }) => o.id).join(",")}
+        </div>
+      );
+    }
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <Probe />
+      </SWRConfig>,
+    );
+
+    expect(await screen.findByTestId("active-ids")).toHaveTextContent(
+      "ord_paid",
+    );
   });
 });

@@ -1,39 +1,70 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 
-export function CheckoutTimer({ expiresAt }: { expiresAt: string }) {
-  const router = useRouter();
-  const [timeLeft, setTimeLeft] = useState<string>("15:00");
-  const [isExpired, setIsExpired] = useState(false);
+function formatRemainingTime(distanceMs: number): string {
+  if (distanceMs <= 0) return "00:00";
+  const minutes = Math.floor(distanceMs / 60000);
+  const seconds = Math.floor((distanceMs % 60000) / 1000);
+  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+export function CheckoutTimer({
+  expiresAt,
+  onExpire,
+}: {
+  expiresAt: string;
+  onExpire?: () => void;
+}) {
+  const [timeLeft, setTimeLeft] = useState<string>(() =>
+    formatRemainingTime(new Date(expiresAt).getTime() - Date.now()),
+  );
+  const [isExpired, setIsExpired] = useState<boolean>(
+    () => new Date(expiresAt).getTime() - Date.now() <= 0,
+  );
+
+  const onExpireRef = useRef(onExpire);
+  const hasFiredExpireRef = useRef(false);
 
   useEffect(() => {
+    onExpireRef.current = onExpire;
+  }, [onExpire]);
+
+  useEffect(() => {
+    hasFiredExpireRef.current = false;
     const target = new Date(expiresAt).getTime();
 
-    const interval = setInterval(() => {
-      const now = new Date().getTime();
-      const distance = target - now;
+    const updateTimer = () => {
+      const distance = target - Date.now();
 
       if (distance <= 0) {
-        clearInterval(interval);
+        setTimeLeft("00:00");
         setIsExpired(true);
-        // FORCE THE PAGE TO RELOAD OR REDIRECT
-        router.refresh();
-        return;
+        if (!hasFiredExpireRef.current) {
+          hasFiredExpireRef.current = true;
+          onExpireRef.current?.();
+        }
+        return true;
       }
 
-      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+      setIsExpired(false);
+      setTimeLeft(formatRemainingTime(distance));
+      return false;
+    };
 
-      setTimeLeft(
-        `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
-      );
+    const expiredImmediately = updateTimer();
+    if (expiredImmediately) return;
 
-      return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      const finished = updateTimer();
+      if (finished) {
+        clearInterval(interval);
+      }
     }, 1000);
-  }, [expiresAt, router]);
+
+    return () => clearInterval(interval);
+  }, [expiresAt]);
 
   if (isExpired) return null;
 

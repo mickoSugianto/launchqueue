@@ -22,9 +22,13 @@ export function OrderSummary({
   // EXTRACTING THE HYDRATED DATA IN MSW
   const { item, subtotal } = order;
 
-  // RECALCULATE: IF THE PARENT GIVES A DYNAMIC FEE. OTHERWISE, USE THE DB FALLBACL
+  // RECALCULATE: IF THE PARENT GIVES A DYNAMIC FEE. OTHERWISE, USE THE DB FALLBACK
   const activeShippingFee = dynamicShippingFee ?? order.shippingFee;
-  const activeTotal = subtotal + activeShippingFee;
+  const activeTotal =
+    dynamicShippingFee !== undefined
+      ? subtotal + dynamicShippingFee
+      : (order.totalAmount ?? subtotal + activeShippingFee);
+  const heroImage = item.heroImage?.trim();
 
   return (
     <div className="bg-white border border-zinc-200 rounded-sm overflow-hidden">
@@ -35,12 +39,15 @@ export function OrderSummary({
         {/* THE HYDRATED ITEM CARD */}
         <div className="flex items-center gap-4">
           <div className="relative w-20 h-24 bg-zinc-100 rounded-sm overflow-hidden flex-shrink-0">
-            <Image
-              src={item.heroImage}
-              alt={item.name}
-              fill
-              className="object-cover"
-            />
+            {heroImage ? (
+              <Image
+                src={heroImage}
+                alt={item.name}
+                fill
+                sizes="80px"
+                className="object-cover"
+              />
+            ) : null}
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-bold leading-tight">{item.name}</span>
