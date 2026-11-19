@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Order, OrderStatus } from "@/types";
 import { useAdminOrders } from "@/lib/hooks/useAdminOrders";
 import { ORDER_STATUS_FLOW, formatOrderDisplayCode } from "@/lib/constants";
+import { apiFetch } from "@/lib/apiFetch";
 import {
   Dialog,
   DialogContent,
@@ -59,7 +60,7 @@ export default function AdminDashboard() {
 
     // FIRE THE NETWORK REQUEST IN THE BACKGROUND
     try {
-      const res = await fetch(`/api/admin/orders/${orderId}`, {
+      const res = await apiFetch(`/api/admin/orders/${orderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
@@ -87,17 +88,24 @@ export default function AdminDashboard() {
 
   if (isError) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 space-y-4 p-4">
         <p className="text-sm font-bold tracking-widest uppercase text-red-500">
           Failed to load fulfillment pipeline.
         </p>
+        <button
+          type="button"
+          onClick={() => void mutate()}
+          className="px-4 py-2 bg-zinc-900 text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-zinc-800 transition-colors cursor-pointer"
+        >
+          Retry
+        </button>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-zinc-100 p-4 md:p-8">
-      <header className="mb-8 flex justify-between items-end">
+      <header className="mb-8 flex justify-between items-end gap-4">
         <div>
           <h1 className="text-2xl font-black tracking-tighter uppercase text-zinc-900">
             Fulfillment HQ
@@ -106,6 +114,12 @@ export default function AdminDashboard() {
             {activeOrders.length} active orders in the pipeline
           </p>
         </div>
+        <Link
+          href="/"
+          className="text-xs font-bold tracking-widest uppercase text-zinc-500 hover:text-zinc-900 transition-colors"
+        >
+          ← LaunchQueue
+        </Link>
       </header>
       {/* THE KANBAN GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start">

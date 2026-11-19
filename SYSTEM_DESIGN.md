@@ -45,9 +45,10 @@ flowchart TB
         subgraph HooksAndForms["Data Fetching & Mutation Layer"]
             useCampaigns["useCampaigns()<br/>SWR Poll: 10s"]
             useCampaign["useCampaign(slug)<br/>SWR Poll: 5s"]
-            useCheckout["useCheckout(sessionId)<br/>SWR Poll: 3s"]
+            useActiveCheckout["useActiveCheckout(campaignId?)<br/>SWR Poll: 5s + storage sync"]
+            useCheckout["useCheckout(sessionId)<br/>SWR Poll: 3s + storage sync"]
             useAdminOrders["useAdminOrders()<br/>SWR Poll: 3s + Optimistic mutate()"]
-            DirectFetch["Imperative fetch()<br/>POST /lock, POST /complete,<br/>PATCH /admin/orders/:id, GET /shipping-rates"]
+            DirectFetch["Imperative apiFetch()<br/>POST /lock, /cancel, /complete,<br/>PATCH /admin/orders/:id, GET /shipping-rates"]
         end
 
         subgraph Gatekeeper["Bootstrapping Layer"]
@@ -68,7 +69,9 @@ flowchart TB
     end
 
     Home --> useCampaigns
+    Home --> useActiveCheckout
     Drop --> useCampaign
+    Drop --> useActiveCheckout
     Drop --> DirectFetch
     Checkout --> useCheckout
     Checkout --> DirectFetch
@@ -76,7 +79,7 @@ flowchart TB
     Admin --> useAdminOrders
     Admin --> DirectFetch
 
-    useCampaigns & useCampaign & useCheckout & useAdminOrders & DirectFetch --> MSWProvider
+    useCampaigns & useCampaign & useActiveCheckout & useCheckout & useAdminOrders & DirectFetch --> MSWProvider
     MSWProvider -->|Intercepts /api/*| Router
     Router --> Latency
     Router --> Chaos
@@ -103,13 +106,16 @@ flowchart LR
     MSWProvider --> ReceiptPage["ReceiptPage (/receipt/[sessionId])"]
     MSWProvider --> AdminDashboard["AdminDashboard (/admin)"]
 
+    HomePage --> ActiveBanner1["ActiveCheckoutBanner.tsx<br/>(Resume / Release Hold)"]
+    DropPage --> ActiveBanner2["ActiveCheckoutBanner.tsx<br/>(Filtered by campaignId)"]
     DropPage --> DropCountdown["DropCountdown.tsx<br/>(1s interval timer)"]
     DropPage --> VariantRadio["Radix RadioGroup<br/>(Color/Size/Stock)"]
     DropPage --> SizeGuideModal["Radix Dialog<br/>(Size Guide Preview)"]
 
     CheckoutPage --> CheckoutTimer["CheckoutTimer.tsx<br/>(15-min countdown)"]
-    CheckoutPage --> AddressForm["AddressForm.tsx<br/>(RHF + Zod + watch('city'))"]
+    CheckoutPage --> AddressForm["AddressForm.tsx<br/>(RHF + Zod + onComplete guard bypass)"]
     CheckoutPage --> OrderSummary1["OrderSummary.tsx<br/>(Dynamic Shipping Preview)"]
+    CheckoutPage --> AbandonDialog["Radix Dialog<br/>(Abandon Checkout Confirmation)"]
 
     ReceiptPage --> Timeline["4-Step Animated Progress Bar"]
     ReceiptPage --> OrderSummary2["OrderSummary.tsx<br/>(Finalized Ledger)"]
@@ -122,11 +128,11 @@ flowchart LR
 
 | Route | File Path | Data Hook(s) | Polling / Refresh | Gatekeeper / Guard Conditions | Primary User Actions |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `/` | `src/app/page.tsx` | `useCampaigns()` | Every `10,000ms` + `revalidateOnFocus: true` | Shows `"Initializing Engine..."` while loading; `"System Failure."` on error | Browse live drops, navigate to `/[brandSlug]/[slug]` (via `sanitizeBrandIdToSlug`) or `/admin` |
-| `/[brand]/[slug]` | `src/app/(buyer)/[brand]/[slug]/page.tsx` | `useCampaign(slug)` | Every `5,000ms` + `revalidateOnFocus: true` | Shows `"Syncing with Engine..."` while loading; `"404 - Drop Not Found"` if missing, `!campaign.isActive`, or `sanitizeBrandIdToSlug(campaign.brandId) !== params.brand` | Watch countdown, view size chart modal, select variant, click **Buy Now** to lock stock |
-| `/checkout/[sessionId]` | `src/app/checkout/[sessionId]/page.tsx` | `useCheckout(sessionId)` + `fetch('/api/shipping-rates')` | Every `3,000ms` (`revalidateOnFocus: false`) | Shows `"Securing Session..."` while loading; `"Session Expired or Invalid"` on `404`/`410`/`EXPIRED`/timer timeout; redirects paid orders (`status !== "AWAITING_PAYMENT"`) to `/receipt/[sessionId]` | Complete shipping form before 15-minute `CheckoutTimer` expires; dynamically preview shipping fee |
-| `/receipt/[sessionId]` | `src/app/receipt/[sessionId]/page.tsx` | `useCheckout(sessionId)` | Every `3,000ms` (`revalidateOnFocus: false`) | Rejects `AWAITING_PAYMENT` and `EXPIRED` orders (`"Order Not Found or Payment Incomplete"` screen); allows `PAYMENT_VERIFIED`, `IN_PRODUCTION`, `READY_TO_SHIP`, `SHIPPED` indefinitely beyond 15 minutes | View live-updating 4-stage fulfillment progress bar, contact/address details, and itemized receipt |
-| `/admin` | `src/app/admin/page.tsx` | `useAdminOrders()` | Every `3,000ms` (`revalidateOnFocus: false`) | Shows `"Failed to load fulfillment pipeline."` on error; filters out `AWAITING_PAYMENT` and `EXPIRED` orders from Kanban columns | Inspect paid orders, open confirmation modal, optimistically advance order status across 4 columns (`toast.error()` on rollback) |
+| `/` | `src/app/page.tsx` | `useCampaigns()` + `useActiveCheckout()` | `10,000ms` / `5,000ms` + `revalidateOnFocus: true` + `storage` sync | Shows `"Initializing Engine..."` while loading; `"System Failure."` on error; `ActiveCheckoutBanner` surfaces active/paused holds | Browse live drops, resume or release an active checkout hold, navigate to `/[brandSlug]/[slug]` or `/admin` |
+| `/[brand]/[slug]` | `src/app/(buyer)/[brand]/[slug]/page.tsx` | `useCampaign(slug)` + `useActiveCheckout(campaign.id)` | `5,000ms` + `revalidateOnFocus: true` + `storage` sync | Shows `"Syncing with Engine..."` while loading; `"404 - Drop Not Found"` if missing, `!campaign.isActive`, or `sanitizeBrandIdToSlug(campaign.brandId) !== params.brand` | Watch countdown, resume/release active campaign hold via `ActiveCheckoutBanner`, view size chart modal, select variant, click **Buy Now** to lock stock |
+| `/checkout/[sessionId]` | `src/app/checkout/[sessionId]/page.tsx` | `useCheckout(sessionId)` + `fetch('/api/shipping-rates')` | Every `3,000ms` (`revalidateOnFocus: false`) + `storage` sync | Shows `"Securing Session..."` while loading; `"Session Expired or Invalid"` on `404`/`410` (`EXPIRED` / `CANCELLED`)/timer timeout; redirects paid orders (`status !== "AWAITING_PAYMENT" && !== "EXPIRED" && !== "CANCELLED"`) to `/receipt/[sessionId]`; intercepts `← Home`, `popstate`, and `beforeunload` while `AWAITING_PAYMENT`; records `leftAt` on unconfirmed teardown | Complete shipping form before 15-minute `CheckoutTimer` expires, dynamically preview shipping fee, or confirm abandonment to cancel & release stock |
+| `/receipt/[sessionId]` | `src/app/receipt/[sessionId]/page.tsx` | `useCheckout(sessionId)` | Every `3,000ms` (`revalidateOnFocus: false`) | Rejects `AWAITING_PAYMENT`, `EXPIRED`, and `CANCELLED` orders (`"Order Not Found or Payment Incomplete"` screen); allows `PAYMENT_VERIFIED`, `IN_PRODUCTION`, `READY_TO_SHIP`, `SHIPPED` indefinitely beyond 15 minutes | View live-updating 4-stage fulfillment progress bar, contact/address details, and itemized receipt |
+| `/admin` | `src/app/admin/page.tsx` | `useAdminOrders()` | Every `3,000ms` (`revalidateOnFocus: false`) | Shows `"Failed to load fulfillment pipeline."` on error; filters out `AWAITING_PAYMENT`, `EXPIRED`, and `CANCELLED` orders from Kanban columns | Inspect paid orders, open confirmation modal, optimistically advance order status across 4 columns (`toast.error()` on rollback) |
 
 ---
 
@@ -176,6 +182,7 @@ classDiagram
         +number totalAmount (IDR)
         +string lockedAt (ISO-8601)
         +string expiresAt (ISO-8601)
+        +string? leftAt (ISO-8601 | null)
         +Customer customer
         +Item item
     }
@@ -204,6 +211,7 @@ classDiagram
         READY_TO_SHIP
         SHIPPED
         EXPIRED
+        CANCELLED
     }
 
     Campaign "1" *-- "1..*" ProductVariant : contains
@@ -239,6 +247,7 @@ stateDiagram-v2
     }
 
     AWAITING_PAYMENT --> EXPIRED : now >= expiresAt on<br/>GET /checkout/:id (410), POST /complete (410),<br/>or sweepExpiredOrders() (persists EXPIRED & reclaims stock)
+    AWAITING_PAYMENT --> CANCELLED : POST /checkout/:id/cancel OR<br/>now >= leftAt + 3m grace window<br/>(persists CANCELLED & reclaims stock)
     AWAITING_PAYMENT --> PAYMENT_VERIFIED : POST /api/checkout/complete<br/>(Before expiresAt, saves Customer & City Shipping Fee)
 
     state "Fulfillment Pipeline (Visible on /receipt/:id & /admin)" as FulfillmentPipeline {
@@ -248,6 +257,7 @@ stateDiagram-v2
     }
 
     EXPIRED --> [*]
+    CANCELLED --> [*]
     SHIPPED --> [*]
 ```
 
@@ -255,8 +265,9 @@ stateDiagram-v2
 
 | State (`OrderStatus`) | Entry Trigger | Next Allowed State | Visible on `/checkout/[id]`? | Visible on `/receipt/[id]`? | Visible on `/admin` Kanban? |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `AWAITING_PAYMENT` | Buyer clicks **Buy Now** (`POST /api/checkout/lock`) | `PAYMENT_VERIFIED` or `EXPIRED` | **Yes** (while `now < expiresAt` and `!hasTimedOut`) | **No** (Blocked by `VALID_RECEIPT_STATUSES` guard) | **No** (Filtered out by `useAdminOrders`) |
+| `AWAITING_PAYMENT` | Buyer clicks **Buy Now** (`POST /api/checkout/lock`) | `PAYMENT_VERIFIED`, `EXPIRED`, or `CANCELLED` | **Yes** (while `now < expiresAt`, `!hasTimedOut`, and within 3m grace if `leftAt` set) | **No** (Blocked by `VALID_RECEIPT_STATUSES` guard) | **No** (Filtered out by `useAdminOrders`) |
 | `EXPIRED` | `now >= expiresAt` on an `AWAITING_PAYMENT` order during `GET /api/checkout/:sessionId`, `POST /api/checkout/complete`, or `sweepExpiredOrders()` (persisted to `localStorage["dbOrders"]` and reclaims stock once) | Terminal State (`null`) | **No** (`410 SESSION_EXPIRED` error screen) | **No** (Blocked by guard) | **No** (Filtered out by `useAdminOrders`) |
+| `CANCELLED` | Buyer confirms abandonment (`POST /api/checkout/:sessionId/cancel`), clicks **Release Hold** on `ActiveCheckoutBanner`, or 3-minute grace window (`leftAt + CHECKOUT_GRACE_MS`) elapses without resuming checkout (persisted to `localStorage["dbOrders"]` and reclaims stock once) | Terminal State (`null`) | **No** (`410 SESSION_CANCELLED` `"Session Expired or Invalid"` screen) | **No** (Blocked by guard) | **No** (Filtered out by `useAdminOrders`) |
 | `PAYMENT_VERIFIED` | Buyer submits `AddressForm` (`POST /api/checkout/complete`) | `IN_PRODUCTION` | **No** (`CheckoutPage` redirects to `/receipt/[id]`; `POST /complete` returns `409 ORDER_ALREADY_COMPLETED`) | **Yes** (Timeline Step 1/4: *Paid*; accessible indefinitely beyond 15m) | **Yes** (Column 1: *New Orders*) |
 | `IN_PRODUCTION` | Admin advances from *New Orders* (`PATCH /api/admin/orders/:id`) | `READY_TO_SHIP` | **No** (Redirects to `/receipt/[id]`; `POST /complete` returns `409`) | **Yes** (Timeline Step 2/4: *In Production*; accessible indefinitely beyond 15m) | **Yes** (Column 2: *In Production*) |
 | `READY_TO_SHIP` | Admin advances from *In Production* (`PATCH /api/admin/orders/:id`) | `SHIPPED` | **No** (Redirects to `/receipt/[id]`; `POST /complete` returns `409`) | **Yes** (Timeline Step 3/4: *Ready to Ship*; accessible indefinitely beyond 15m) | **Yes** (Column 3: *Ready to Ship*) |
@@ -482,9 +493,12 @@ sequenceDiagram
 | **1** | `GET /api/campaigns` | `500ms` | None | `Campaign[]` | — | Runs `sweepExpiredOrders()`; returns unified `globalThis.dbCampaigns` (removes stale `localStorage["dbCampaigns"]`) |
 | **2** | `GET /api/campaigns/:slug` | `800ms` | `params.slug` | `Campaign` | `404 { message: "Not Found" }` | Runs `sweepExpiredOrders()`; if `now >= dropDate`, runs **Chaos Simulator**: decrements each variant's `availableInventory` by `0..3` in `globalThis.dbCampaigns` |
 | **3** | `GET /api/shipping-rates` | `0ms` | None | `ShippingRates` (`Record<string, number>`) | — | Read-only from `mockShippingRates` |
-| **4** | `POST /api/checkout/lock` | `1200ms` | `{ slug: string, variantId: string, city: string }` | `Order` (`status: "AWAITING_PAYMENT"`, `expiresAt: +15m`) | `400 { error: "INVALID_REQUEST" }`<br/>`404 { error: "CAMPAIGN_NOT_FOUND" \| "VARIANT_NOT_FOUND" }`<br/>`409 { error: "SOLD_OUT" \| "MAX_PURCHASE_EXCEEDED" }`<br/>`403 { error: "DROP_NOT_ACTIVE" }` | Sweeps expired orders; enforces active `AWAITING_PAYMENT` hold count `< variant.maxPurchase` (excluding `debug_123`); decrements `variant.availableInventory -= 1` in `globalThis.dbCampaigns`; appends new `Order` to `localStorage["dbOrders"]` |
-| **5** | `GET /api/checkout/:sessionId` | `500ms` | `params.sessionId` | `Order` | `404 { error: "SESSION_NOT_FOUND" }`<br/>`410 { error: "SESSION_EXPIRED" }` | Expires only `AWAITING_PAYMENT` orders where `now >= expiresAt` (persists `"EXPIRED"` to `localStorage["dbOrders"]` and reclaims stock once); paid/fulfilled orders remain accessible (`200`) indefinitely |
-| **6** | `POST /api/checkout/complete` | `1500ms` | `{ sessionId: string, shippingDetails: CheckoutFormData }` | `{ success: true, receiptUrl: "/receipt/:sessionId" }` | `400 { error: "INVALID_REQUEST" \| "INVALID_SHIPPING_DETAILS" }`<br/>`404 { error: "ORDER_NOT_FOUND" }`<br/>`410 { error: "SESSION_EXPIRED" }`<br/>`409 { error: "ORDER_ALREADY_COMPLETED", receiptUrl }` | Expires overdue `AWAITING_PAYMENT` orders (`410` + stock reclaim); rejects non-`AWAITING_PAYMENT` orders (`409`) and unsupported cities (`400`); otherwise sets `status = "PAYMENT_VERIFIED"`, saves `customer`, recalculates `shippingFee` & `totalAmount`, persists to `localStorage["dbOrders"]` |
+| **4** | `POST /api/checkout/lock` | `1200ms` | `{ slug: string, variantId: string, city: string }` | `Order` (`status: "AWAITING_PAYMENT"`, `expiresAt: +15m`) | `400 { error: "INVALID_REQUEST" }`<br/>`404 { error: "CAMPAIGN_NOT_FOUND" \| "VARIANT_NOT_FOUND" }`<br/>`409 { error: "SOLD_OUT" \| "MAX_PURCHASE_EXCEEDED" }`<br/>`403 { error: "DROP_NOT_ACTIVE" }` | Sweeps expired & grace-elapsed orders; enforces active `AWAITING_PAYMENT` hold count `< variant.maxPurchase` (excluding `debug_123`); decrements `variant.availableInventory -= 1` in `globalThis.dbCampaigns`; appends new `Order` to `localStorage["dbOrders"]` |
+| **4B** | `GET /api/checkout/active` | `0ms` | Optional `?campaignId=` | `Order[]` (newest `lockedAt` first) | — | Runs `sweepExpiredOrders()`; returns active `AWAITING_PAYMENT` holds excluding `debug_123` (optionally filtered by `campaignId`) |
+| **5** | `GET /api/checkout/:sessionId` | `500ms` | `params.sessionId` | `Order` | `404 { error: "SESSION_NOT_FOUND" }`<br/>`410 { error: "SESSION_EXPIRED" \| "SESSION_CANCELLED" }` | Runs `expireOrderIfNeeded` (15m `expiresAt` or 3m `leftAt` grace); clears `leftAt = null` if resuming active `AWAITING_PAYMENT` hold; paid/fulfilled orders remain accessible (`200`) indefinitely |
+| **5B** | `POST /api/checkout/:sessionId/cancel` | `400ms` | `params.sessionId` | `{ success: true, status }` | `404 { error: "SESSION_NOT_FOUND" }`<br/>`409 { error: "ORDER_ALREADY_COMPLETED", receiptUrl }` | Idempotent for `EXPIRED`/`CANCELLED`; transitions `AWAITING_PAYMENT` to `"CANCELLED"`, clears `leftAt`, reclaims variant stock once, and persists to `localStorage["dbOrders"]` |
+| **5C** | `POST /api/checkout/:sessionId/leave` | `0ms` | `params.sessionId` | `{ success: true, status, leftAt }` | `404 { error: "SESSION_NOT_FOUND" }`<br/>`410 { error: "SESSION_EXPIRED" \| "SESSION_CANCELLED" }` | Records initial `leftAt` timestamp (preserving existing `leftAt`) on active `AWAITING_PAYMENT` orders to start the 3-minute grace window |
+| **6** | `POST /api/checkout/complete` | `1500ms` | `{ sessionId: string, shippingDetails: CheckoutFormData }` | `{ success: true, receiptUrl: "/receipt/:sessionId", order: Order }` | `400 { error: "INVALID_REQUEST" \| "INVALID_SHIPPING_DETAILS" }`<br/>`404 { error: "ORDER_NOT_FOUND" }`<br/>`410 { error: "SESSION_EXPIRED" \| "SESSION_CANCELLED" }`<br/>`409 { error: "ORDER_ALREADY_COMPLETED", receiptUrl, order }` | Expires/cancels overdue `AWAITING_PAYMENT` orders (`410` + stock reclaim); rejects `CANCELLED` (`410`) and paid (`409`) orders and unsupported cities (`400`); otherwise sets `status = "PAYMENT_VERIFIED"`, clears `leftAt`, saves `customer`, recalculates `shippingFee` & `totalAmount`, persists to `localStorage["dbOrders"]` |
 | **7** | `GET /api/admin/orders` | `400ms` | None | `Order[]` | — | Runs `sweepExpiredOrders()` and returns all orders from `localStorage["dbOrders"]` (seeding `defaultOrders` if empty or corrupted) |
 | **8** | `PATCH /api/admin/orders/:id` | `800ms` | `{ status: OrderStatus }` | `{ success: true, order: Order }` | `400 { error: "INVALID_REQUEST" }`<br/>`404 { error: "ORDER_NOT_FOUND" }`<br/>`409 { error: "INVALID_STATUS_TRANSITION" }` | Validates sequential `ORDER_STATUS_FLOW[order.status] === status`; updates `order.status` and persists to `localStorage["dbOrders"]` |
 
@@ -517,7 +531,9 @@ sequenceDiagram
 | **Initial Drop Launch Offset** | `src/mocks/data.ts` | `+15,000ms` from module load | Gives the user a 15-second countdown experience upon loading a drop |
 | **Drop Countdown Tick** | `src/components/drop/DropCountdown.tsx` | `1,000ms` (`setInterval`) | Updates `Days : Hrs : Min : Sec` and fires `onLive()` at `<= 0` |
 | **Reservation Lock Window** | `src/mocks/handlers.ts` (`/api/checkout/lock`) | `15 minutes` (`15 * 60,000ms`) | Sets `order.expiresAt`; enforced by both UI timer and MSW endpoints |
+| **Abandonment Grace Window** | `src/lib/checkoutStorage.ts` (`CHECKOUT_GRACE_MS`) | `3 minutes` (`3 * 60,000ms`) | Records `leftAt` synchronously via `markCheckoutLeft` if a buyer leaves checkout without completing/cancelling; auto-transitions to `CANCELLED` & reclaims stock after 3m unless resumed |
 | **Checkout Countdown Tick** | `src/components/checkout/CheckoutTimer.tsx` | `1,000ms` (`setInterval`) | Renders `MM:SS` badge immediately on mount without `"15:00"` flash; invokes `onExpire()` once when `distance <= 0` (`CheckoutPage` sets immediate expired UI + `mutate()`) and clears interval on unmount |
+| **Active Hold Banner & Poll** | `src/lib/hooks/useActiveCheckout.ts`, `ActiveCheckoutBanner.tsx` | `5,000ms` + `revalidateOnFocus: true` + `storage` sync | Displays remaining hold/grace `MM:SS` countdown with **Resume Checkout** and one-click **Release Hold** actions on `/` and `/[brand]/[slug]` |
 | **Homepage Catalog Poll** | `src/lib/hooks/useCampaigns.ts` | `10,000ms` + `revalidateOnFocus: true` | Keeps campaign cards synced |
 | **Drop Page Stock Poll** | `src/lib/hooks/useCampaign.ts` | `5,000ms` + `revalidateOnFocus: true` | Refreshes variant stock counts and triggers MSW Chaos Simulator |
 | **Checkout & Receipt Poll** | `src/lib/hooks/useCheckout.ts` | `3,000ms` (`revalidateOnFocus: false`) | Detects session expiry on Checkout and Admin status updates on Receipt |

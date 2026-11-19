@@ -1,8 +1,9 @@
 import useSWR from "swr";
 import { Order } from "@/types";
+import { apiFetch } from "@/lib/apiFetch";
 
 const fetcher = (url: string) =>
-  fetch(url).then((res) => {
+  apiFetch(url).then((res) => {
     if (!res.ok) throw new Error("Failed to fetch orders");
     return res.json();
   });
@@ -16,7 +17,10 @@ export function useAdminOrders() {
 
   const activeOrders =
     data?.filter(
-      (o: Order) => o.status !== "AWAITING_PAYMENT" && o.status !== "EXPIRED",
+      (o: Order) =>
+        o.status !== "AWAITING_PAYMENT" &&
+        o.status !== "EXPIRED" &&
+        o.status !== "CANCELLED",
     ) || [];
 
   return {

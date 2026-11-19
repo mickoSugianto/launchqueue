@@ -85,7 +85,50 @@ describe("ReceiptPage - Gatekeeper, Details & Fulfillment Timeline", () => {
     expect(screen.getByText(/Retrieving Order.../i)).toBeInTheDocument();
   });
 
-  it.each<OrderStatus>(["AWAITING_PAYMENT", "EXPIRED"])(
+  it("renders 'Retrieving Order...' during initial mount revalidation of stale pre-payment cache and stays stable on subsequent polls", () => {
+    (useCheckout as jest.Mock).mockReturnValue({
+      order: createReceiptOrder({ status: "AWAITING_PAYMENT" }),
+      isLoading: false,
+      isValidating: true,
+      isError: false,
+    });
+
+    const { rerender } = render(<ReceiptPage />);
+
+    expect(screen.getByText(/Retrieving Order.../i)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Order Not Found or Payment Incomplete"),
+    ).not.toBeInTheDocument();
+
+    // Once initial revalidation settles with AWAITING_PAYMENT, show the gatekeeper error
+    (useCheckout as jest.Mock).mockReturnValue({
+      order: createReceiptOrder({ status: "AWAITING_PAYMENT" }),
+      isLoading: false,
+      isValidating: false,
+      isError: false,
+    });
+    rerender(<ReceiptPage />);
+
+    expect(
+      screen.getByText("Order Not Found or Payment Incomplete"),
+    ).toBeInTheDocument();
+
+    // Subsequent 3s background poll must not flicker back to "Retrieving Order..."
+    (useCheckout as jest.Mock).mockReturnValue({
+      order: createReceiptOrder({ status: "AWAITING_PAYMENT" }),
+      isLoading: false,
+      isValidating: true,
+      isError: false,
+    });
+    rerender(<ReceiptPage />);
+
+    expect(
+      screen.getByText("Order Not Found or Payment Incomplete"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Retrieving Order.../i)).not.toBeInTheDocument();
+  });
+
+  it.each<OrderStatus>(["AWAITING_PAYMENT", "EXPIRED", "CANCELLED"])(
     "blocks access for invalid %s status and allows returning to store",
     async (status) => {
       const user = userEvent.setup();

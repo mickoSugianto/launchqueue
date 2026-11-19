@@ -1,11 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { mutate } from "swr";
+import { ensureMswActive } from "@/lib/apiFetch";
 
 export function MSWProvider({ children }: { children: React.ReactNode }) {
   const [mswReady, setMswReady] = useState(false);
   const [mswError, setMswError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (pathname && !pathname.startsWith("/checkout/")) {
+      try {
+        sessionStorage.setItem("lq:hasPriorRoute", "1");
+      } catch {
+        // Ignore sessionStorage errors
+      }
+    }
+  }, [pathname]);
 
   useEffect(() => {
     // EDGE CASE: MAKE SURE IT DOESN'T RUN ON THE SERVER
@@ -43,6 +58,48 @@ export function MSWProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [retryCount]);
+
+  useEffect(() => {
+    if (!mswReady || typeof window === "undefined") return;
+
+    let cancelled = false;
+
+    const handleWake = () => {
+      void ensureMswActive()
+        .then((reactivated) => {
+          if (reactivated && !cancelled) {
+            void mutate(
+              (key) => typeof key === "string" && key.startsWith("/api/"),
+            );
+          }
+        })
+        .catch(() => {
+          // Reactive retry in apiFetch handles individual requests if wake check fails
+        });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleWake();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWake);
+    window.addEventListener("online", handleWake);
+
+    const sw =
+      typeof navigator !== "undefined" ? navigator.serviceWorker : undefined;
+    sw?.addEventListener("controllerchange", handleWake);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWake);
+      window.removeEventListener("online", handleWake);
+      sw?.removeEventListener("controllerchange", handleWake);
+    };
+  }, [mswReady]);
 
   if (mswError) {
     return (

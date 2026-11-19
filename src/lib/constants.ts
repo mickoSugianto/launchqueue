@@ -7,6 +7,7 @@ export const ORDER_STATUS_FLOW: Record<OrderStatus, OrderStatus | null> = {
   READY_TO_SHIP: "SHIPPED",
   SHIPPED: null,
   EXPIRED: null,
+  CANCELLED: null,
 };
 
 export const SUPPORTED_CITIES = [

@@ -3,8 +3,12 @@
 import { useCallback, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
+import { mutate as globalMutate } from "swr";
 import { useCampaign } from "@/lib/hooks/useCampaign";
+import { apiFetch } from "@/lib/apiFetch";
 import { DropCountdown } from "@/components/drop/DropCountdown";
+import { ActiveCheckoutBanner } from "@/components/checkout/ActiveCheckoutBanner";
 import { toast } from "sonner";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
@@ -24,7 +28,7 @@ export default function DropPage() {
   const params = useParams<{ brand: string; slug: string }>();
 
   // FEED THE SLUG INTO OUR NEW SWR HOOK
-  const { campaign, isLoading, isError } = useCampaign(params.slug);
+  const { campaign, isLoading, isError, mutate } = useCampaign(params.slug);
 
   // THE LOCK STATE
   const [isLive, setIsLive] = useState(false);
@@ -52,7 +56,7 @@ export default function DropPage() {
     setIsLocking(true);
 
     try {
-      const res = await fetch("/api/checkout/lock", {
+      const res = await apiFetch("/api/checkout/lock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // We pass a dummy city for now to calculate initial fake shipping
@@ -72,6 +76,7 @@ export default function DropPage() {
             toast.error(
               "Purchase limit reached. Please complete or wait for your active checkout session to expire.",
             );
+            void globalMutate("/api/checkout/active");
           } else {
             toast.error("Sold Out! Someone beat you to it.");
           }
@@ -126,7 +131,9 @@ export default function DropPage() {
       {/* Brand Header */}
       <header className="w-full border-b border-zinc-200 py-6 px-4 md:px-8 flex justify-between items-center bg-white sticky top-0 z-10">
         <h1 className="text-xl font-bold tracking-tighter uppercase italic">
-          {cleanBrandName(campaign.brandId)}
+          <Link href="/" className="hover:opacity-75 transition-opacity">
+            {cleanBrandName(campaign.brandId)}
+          </Link>
         </h1>
         <p className="text-xs font-medium tracking-widest text-zinc-500 uppercase">
           LaunchQueue Active
@@ -156,6 +163,11 @@ export default function DropPage() {
 
         {/* Right Column: The Command Center (Details & Controls) */}
         <div className="p-4 md:p-12 flex flex-col justify-center max-w-md w-full mx-auto md:sticky md:top-24 h-fit">
+          <ActiveCheckoutBanner
+            campaignId={campaign.id}
+            onRefreshCampaign={() => void mutate()}
+            className="mb-8"
+          />
           <div className="space-y-4">
             <h2 className="text-3xl md:text-4xl font-bold tracking-tighter uppercase leading-none">
               {campaign.title}
@@ -173,18 +185,23 @@ export default function DropPage() {
 
           {/* DROPCOUNTDOWN */}
           <div className="mt-12 p-8 border border-dashed border-zinc-300 rounded-sm text-center bg-zinc-50/50">
-            <div className="bg-zinc-50 border border-zinc-200 p-2 rounded-sm flex flex-col items-center justify-center min-h-[120px]">
-              {isLive ? (
-                <div className="w-full h-full flex items-center justify-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-sm">
+            {isLive ? (
+              <div className="pb-4 mb-6 border-b border-zinc-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
                   <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <span className="text-[15px] font-bold uppercase tracking-widest text-green-700">
+                  <span className="text-xs font-bold uppercase tracking-widest text-zinc-900">
                     Drop is Live
                   </span>
                 </div>
-              ) : (
+                <span className="text-xs font-medium text-zinc-500">
+                  15-min checkout hold
+                </span>
+              </div>
+            ) : (
+              <div className="bg-zinc-50 border border-zinc-200 p-2 rounded-sm flex flex-col items-center justify-center min-h-[120px] mb-6">
                 <div className="flex flex-col items-center gap-2">
                   <span className="text-xs font-bold tracking-widest uppercase text-zinc-400">
                     Unlocks in
@@ -194,8 +211,8 @@ export default function DropPage() {
                     onLive={handleLive}
                   />
                 </div>
-              )}
-            </div>
+              </div>
+            )}
             {/* THE VARIANT SELECTOR */}
             <div className="space-y-4">
               <div className="flex justify-between items-center">

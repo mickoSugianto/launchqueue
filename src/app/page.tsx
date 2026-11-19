@@ -5,9 +5,10 @@ import Image from "next/image";
 import { useCampaigns } from "@/lib/hooks/useCampaigns";
 import { ArrowRight, Activity, Terminal } from "lucide-react";
 import { cleanBrandName, sanitizeBrandIdToSlug } from "@/lib/utils";
+import { ActiveCheckoutBanner } from "@/components/checkout/ActiveCheckoutBanner";
 
 export default function HomePage() {
-  const { campaigns, isLoading, isError } = useCampaigns();
+  const { campaigns, isLoading, isError, mutate } = useCampaigns();
 
   // GATEKEEPER: LOADING
   if (isLoading) {
@@ -23,10 +24,17 @@ export default function HomePage() {
   // GATEKEEPER: ERROR
   if (isError) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 space-y-4 p-4">
         <p className="text-sm font-medium tracking-widest uppercase text-red-500">
           System Failure.
         </p>
+        <button
+          type="button"
+          onClick={() => void mutate()}
+          className="px-4 py-2 bg-zinc-900 text-white text-xs font-bold uppercase tracking-widest rounded-sm hover:bg-zinc-800 transition-colors cursor-pointer"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -51,6 +59,10 @@ export default function HomePage() {
         </p>
       </header>
       <main className="max-w-5xl mx-auto px-6 pb-32">
+        <ActiveCheckoutBanner
+          onRefreshCampaign={() => void mutate()}
+          className="mb-8"
+        />
         <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-900 mb-8 border-b border-zinc-200 pb-4">
           Active Campaigns
         </h2>

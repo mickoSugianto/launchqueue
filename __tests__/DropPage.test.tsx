@@ -2,18 +2,21 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DropPage from "@/app/(buyer)/[brand]/[slug]/page";
 import { useCampaign } from "@/lib/hooks/useCampaign";
+import { useActiveCheckout } from "@/lib/hooks/useActiveCheckout";
 import { toast } from "sonner";
 import type { ImgHTMLAttributes } from "react";
 import { useEffect } from "react";
 
 // MOCKS
-// MOCK THE DATA HOOK
+// MOCK THE DATA HOOKS
 jest.mock("@/lib/hooks/useCampaign");
+jest.mock("@/lib/hooks/useActiveCheckout");
 
 jest.mock("sonner", () => ({
   toast: {
     success: jest.fn(),
     error: jest.fn(),
+    info: jest.fn(),
   },
 }));
 
@@ -62,11 +65,20 @@ jest.mock("@/components/drop/DropCountdown", () => ({
 global.fetch = jest.fn();
 
 describe("DropPage - Checkout Logic & Race Conditions", () => {
+  const mockMutateActive = jest.fn();
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockUseParams.mockReturnValue({
       brand: "kith",
       slug: "premium-heavy-knitwear",
+    });
+    (useActiveCheckout as jest.Mock).mockReturnValue({
+      activeOrder: null,
+      activeOrders: [],
+      isLoading: false,
+      isError: false,
+      mutate: mockMutateActive,
     });
   });
 
@@ -119,6 +131,11 @@ describe("DropPage - Checkout Logic & Race Conditions", () => {
     await waitFor(() => {
       expect(screen.getByText(/Drop is Live/i)).toBeInTheDocument();
     });
+    expect(screen.getByText(/15-min checkout hold/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /kith/i })).toHaveAttribute(
+      "href",
+      "/",
+    );
 
     // Verify initial button state
     const actionButton = screen.getByRole("button", { name: /Select a Size/i });
@@ -323,5 +340,81 @@ describe("DropPage - Checkout Logic & Race Conditions", () => {
       warnSpy.mockRestore();
       errorSpy.mockRestore();
     }
+  });
+
+  it("displays ActiveCheckoutBanner on DropPage and releases hold", async () => {
+    const user = userEvent.setup();
+    const mockMutateCampaign = jest.fn();
+
+    (useCampaign as jest.Mock).mockReturnValue({
+      campaign: {
+        ...mockCampaignBase,
+        variants: [
+          {
+            id: "var_kith_blk_l",
+            name: "Kith for the New York Knicks",
+            color: "Black",
+            size: "L",
+            price: 2500000,
+            totalInventory: 12,
+            availableInventory: 11,
+            weightKG: 1.2,
+            maxPurchase: 1,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      mutate: mockMutateCampaign,
+    });
+
+    (useActiveCheckout as jest.Mock).mockReturnValue({
+      activeOrder: {
+        id: "ord_drop_hold",
+        campaignId: "camp_knit_123",
+        variantId: "var_kith_blk_l",
+        status: "AWAITING_PAYMENT",
+        expiresAt: new Date(Date.now() + 10 * 60000).toISOString(),
+        leftAt: null,
+        item: {
+          name: "Premium Heavy Knitwear Drop",
+          color: "Black",
+          size: "L",
+          heroImage: "",
+        },
+      },
+      activeOrders: [],
+      isLoading: false,
+      isError: false,
+      mutate: mockMutateActive,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, status: "CANCELLED" }),
+    });
+
+    render(<DropPage />);
+
+    expect(useActiveCheckout).toHaveBeenCalledWith("camp_knit_123");
+    expect(screen.getByText(/^Active Checkout Hold$/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Resume Checkout/i }),
+    ).toHaveAttribute("href", "/checkout/ord_drop_hold");
+
+    await user.click(screen.getByRole("button", { name: /Release Hold/i }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/checkout/ord_drop_hold/cancel",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(toast.info).toHaveBeenCalledWith(
+        "Checkout cancelled. Your reserved item has been released.",
+      );
+      expect(mockMutateActive).toHaveBeenCalled();
+      expect(mockMutateCampaign).toHaveBeenCalled();
+    });
   });
 });

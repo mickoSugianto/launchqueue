@@ -5,8 +5,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { mutate as globalMutate } from "swr";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { SUPPORTED_CITIES } from "@/lib/constants";
+import { apiFetch } from "@/lib/apiFetch";
+import type { Order } from "@/types";
 
 interface CheckoutFormData {
   fullName: string;
@@ -22,11 +26,13 @@ export function AddressForm({
   onCityChange,
   availableCities,
   onExpire,
+  onComplete,
 }: {
   sessionId: string;
   onCityChange: (city: string) => void;
   availableCities?: string[];
   onExpire?: () => void;
+  onComplete?: () => void;
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -91,8 +97,20 @@ export function AddressForm({
 
   // THE SUBMIT HANDLER
   const router = useRouter();
+
+  const syncCompletedOrderCache = async (updatedOrder?: Order) => {
+    const checkoutKey = `/api/checkout/${sessionId}`;
+    if (updatedOrder) {
+      await globalMutate(checkoutKey, updatedOrder, { revalidate: false });
+    } else {
+      await globalMutate(checkoutKey);
+    }
+    void globalMutate("/api/checkout/active");
+  };
+
   const processCheckout = async (data: CheckoutFormData) => {
     setIsSubmitting(true);
+    let didRedirect = false;
 
     try {
       const payload = {
@@ -100,16 +118,23 @@ export function AddressForm({
         shippingDetails: data,
       };
 
-      const res = await fetch("/api/checkout/complete", {
+      const res = await apiFetch("/api/checkout/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const responseData = await res.json().catch(() => null);
+      const responseData = (await res.json().catch(() => null)) as {
+        receiptUrl?: string;
+        error?: string;
+        order?: Order;
+      } | null;
 
       if (!res.ok) {
         if (res.status === 409 && responseData?.receiptUrl) {
+          didRedirect = true;
+          onComplete?.();
+          await syncCompletedOrderCache(responseData.order);
           toast.error("Order already completed. Redirecting to receipt...");
           router.replace(responseData.receiptUrl);
           return;
@@ -132,11 +157,21 @@ export function AddressForm({
       }
 
       // SUCCESS!!
+      if (!responseData?.receiptUrl) {
+        toast.error("Checkout failed. Please try again.");
+        return;
+      }
+
+      didRedirect = true;
+      onComplete?.();
+      await syncCompletedOrderCache(responseData.order);
       router.push(responseData.receiptUrl);
     } catch {
       toast.error("Network error. Please try again.");
     } finally {
-      setIsSubmitting(false);
+      if (!didRedirect) {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -233,18 +268,21 @@ export function AddressForm({
           >
             City
           </label>
-          <select
-            id="city"
-            {...register("city")}
-            className={`w-full p-3 border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 bg-white cursor-pointer ${errors.city ? "border-red-500 bg-red-50" : "border-zinc-300"}`}
-          >
-            <option value="">Select your city...</option>
-            {cities.map((city) => (
-              <option key={city} value={city}>
-                {city}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              id="city"
+              {...register("city")}
+              className={`w-full p-3 pr-10 appearance-none border rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 cursor-pointer ${errors.city ? "border-red-500 bg-red-50" : "border-zinc-300 bg-zinc-50"}`}
+            >
+              <option value="">Select your city...</option>
+              {cities.map((city) => (
+                <option key={city} value={city}>
+                  {city}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+          </div>
           {errors.city && (
             <p className="text-xs text-red-500 font-medium">
               {errors.city.message}

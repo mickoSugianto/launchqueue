@@ -5,7 +5,7 @@ interface MockHandler {
   path: string;
   resolver: (ctx: {
     params: Record<string, string>;
-    request: { json: () => Promise<unknown> };
+    request: { url?: string; json: () => Promise<unknown> };
   }) => Promise<{ status: number; body: unknown }>;
 }
 
@@ -59,6 +59,7 @@ async function invoke(
     params?: Record<string, string>;
     body?: unknown;
     malformedJson?: boolean;
+    url?: string;
   } = {},
 ) {
   const handler = handlers.find((h) => h.method === method && h.path === path);
@@ -68,6 +69,7 @@ async function invoke(
   return handler.resolver({
     params: options.params ?? {},
     request: {
+      url: options.url,
       json: async () => {
         if (options.malformedJson) {
           throw new SyntaxError("Malformed JSON");
@@ -232,9 +234,16 @@ describe("MSW API Handlers (src/mocks/handlers.ts)", () => {
       },
     });
     expect(completeRes.status).toBe(200);
-    expect(completeRes.body).toEqual({
+    expect(completeRes.body).toMatchObject({
       success: true,
       receiptUrl: `/receipt/${order.id}`,
+      order: {
+        id: order.id,
+        status: "PAYMENT_VERIFIED",
+        shippingFee: 30000,
+        totalAmount: 2530000,
+        customer: validCustomer,
+      },
     });
 
     // Advance 2 hours past expiresAt: paid order remains accessible (G8)
@@ -259,9 +268,13 @@ describe("MSW API Handlers (src/mocks/handlers.ts)", () => {
       },
     });
     expect(dupRes.status).toBe(409);
-    expect(dupRes.body).toEqual({
+    expect(dupRes.body).toMatchObject({
       error: "ORDER_ALREADY_COMPLETED",
       receiptUrl: `/receipt/${order.id}`,
+      order: {
+        id: order.id,
+        status: "PAYMENT_VERIFIED",
+      },
     });
   });
 
@@ -404,5 +417,205 @@ describe("MSW API Handlers (src/mocks/handlers.ts)", () => {
       },
     });
     expect(lockRes.status).toBe(200);
+  });
+
+  it("cancels checkout via POST /api/checkout/:sessionId/cancel, reclaims stock once, rejects reuse, and allows immediate re-lock", async () => {
+    const handlers = loadHandlers();
+    const campaigns = getGlobalCampaigns();
+    const baseTime = new Date(campaigns[0].dropDate).getTime() + 1000;
+    jest.spyOn(Date, "now").mockReturnValue(baseTime);
+
+    const lockRes = await invoke(handlers, "POST", "/api/checkout/lock", {
+      body: {
+        slug: "knicks-hoodie",
+        variantId: "var_kith_blk_l",
+        city: "Jakarta",
+      },
+    });
+    expect(lockRes.status).toBe(200);
+    const lockedOrder = lockRes.body as Order;
+
+    const variant = campaigns[0].variants.find(
+      (v) => v.id === "var_kith_blk_l",
+    );
+    expect(variant?.availableInventory).toBe(11);
+
+    // Missing session returns 404
+    const missingCancel = await invoke(
+      handlers,
+      "POST",
+      "/api/checkout/:sessionId/cancel",
+      { params: { sessionId: "ord_missing" } },
+    );
+    expect(missingCancel.status).toBe(404);
+    expect(missingCancel.body).toEqual({ error: "SESSION_NOT_FOUND" });
+
+    // Cancel active hold
+    const cancelRes = await invoke(
+      handlers,
+      "POST",
+      "/api/checkout/:sessionId/cancel",
+      { params: { sessionId: lockedOrder.id } },
+    );
+    expect(cancelRes.status).toBe(200);
+    expect(cancelRes.body).toEqual({ success: true, status: "CANCELLED" });
+    expect(variant?.availableInventory).toBe(12);
+
+    // Idempotent repeat cancel does not double-increment stock
+    const repeatCancel = await invoke(
+      handlers,
+      "POST",
+      "/api/checkout/:sessionId/cancel",
+      { params: { sessionId: lockedOrder.id } },
+    );
+    expect(repeatCancel.status).toBe(200);
+    expect(repeatCancel.body).toEqual({ success: true, status: "CANCELLED" });
+    expect(variant?.availableInventory).toBe(12);
+
+    // GET & POST /complete return 410 SESSION_CANCELLED
+    const getCancelled = await invoke(
+      handlers,
+      "GET",
+      "/api/checkout/:sessionId",
+      { params: { sessionId: lockedOrder.id } },
+    );
+    expect(getCancelled.status).toBe(410);
+    expect(getCancelled.body).toEqual({ error: "SESSION_CANCELLED" });
+
+    const completeCancelled = await invoke(
+      handlers,
+      "POST",
+      "/api/checkout/complete",
+      {
+        body: {
+          sessionId: lockedOrder.id,
+          shippingDetails: validCustomer,
+        },
+      },
+    );
+    expect(completeCancelled.status).toBe(410);
+    expect(completeCancelled.body).toEqual({ error: "SESSION_CANCELLED" });
+
+    // Re-locking immediately succeeds without MAX_PURCHASE_EXCEEDED
+    const relockRes = await invoke(handlers, "POST", "/api/checkout/lock", {
+      body: {
+        slug: "knicks-hoodie",
+        variantId: "var_kith_blk_s",
+        city: "Jakarta",
+      },
+    });
+    expect(relockRes.status).toBe(200);
+    const relockedOrder = relockRes.body as Order;
+
+    // Completing order then calling cancel returns 409 ORDER_ALREADY_COMPLETED
+    await invoke(handlers, "POST", "/api/checkout/complete", {
+      body: { sessionId: relockedOrder.id, shippingDetails: validCustomer },
+    });
+    const cancelPaid = await invoke(
+      handlers,
+      "POST",
+      "/api/checkout/:sessionId/cancel",
+      { params: { sessionId: relockedOrder.id } },
+    );
+    expect(cancelPaid.status).toBe(409);
+    expect(cancelPaid.body).toEqual({
+      error: "ORDER_ALREADY_COMPLETED",
+      receiptUrl: `/receipt/${relockedOrder.id}`,
+    });
+  });
+
+  it("tracks active holds via GET /api/checkout/active, clears leftAt on resume, and auto-cancels after 3-minute grace", async () => {
+    const handlers = loadHandlers();
+    const campaigns = getGlobalCampaigns();
+    const baseTime = new Date(campaigns[0].dropDate).getTime() + 1000;
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(baseTime);
+
+    // Lock an order
+    const lockRes = await invoke(handlers, "POST", "/api/checkout/lock", {
+      body: {
+        slug: "knicks-hoodie",
+        variantId: "var_kith_blk_l",
+        city: "Jakarta",
+      },
+    });
+    expect(lockRes.status).toBe(200);
+    const order = lockRes.body as Order;
+    const variant = campaigns[0].variants.find(
+      (v) => v.id === "var_kith_blk_l",
+    );
+    expect(variant?.availableInventory).toBe(11);
+
+    // GET /api/checkout/active returns active hold without campaignId and with matching campaignId
+    const activeAll = await invoke(handlers, "GET", "/api/checkout/active");
+    expect(activeAll.status).toBe(200);
+    expect((activeAll.body as Order[]).map((o) => o.id)).toEqual([order.id]);
+
+    const activeMatching = await invoke(
+      handlers,
+      "GET",
+      "/api/checkout/active",
+      { url: `http://localhost/api/checkout/active?campaignId=${campaigns[0].id}` },
+    );
+    expect((activeMatching.body as Order[]).map((o) => o.id)).toEqual([
+      order.id,
+    ]);
+
+    const activeOther = await invoke(handlers, "GET", "/api/checkout/active", {
+      url: "http://localhost/api/checkout/active?campaignId=camp_other",
+    });
+    expect(activeOther.body).toEqual([]);
+
+    // Leave checkout -> sets leftAt without resetting on duplicate leave calls
+    const leaveRes1 = await invoke(
+      handlers,
+      "POST",
+      "/api/checkout/:sessionId/leave",
+      { params: { sessionId: order.id } },
+    );
+    expect(leaveRes1.status).toBe(200);
+    const firstLeftAt = (leaveRes1.body as { leftAt: string }).leftAt;
+    expect(firstLeftAt).toBe(new Date(baseTime).toISOString());
+
+    // Advance 60s and call leave again -> original leftAt preserved
+    nowSpy.mockReturnValue(baseTime + 60000);
+    const leaveRes2 = await invoke(
+      handlers,
+      "POST",
+      "/api/checkout/:sessionId/leave",
+      { params: { sessionId: order.id } },
+    );
+    expect((leaveRes2.body as { leftAt: string }).leftAt).toBe(firstLeftAt);
+
+    // Resume checkout within 3 minutes -> clears leftAt
+    nowSpy.mockReturnValue(baseTime + 2 * 60000);
+    const resumeRes = await invoke(
+      handlers,
+      "GET",
+      "/api/checkout/:sessionId",
+      { params: { sessionId: order.id } },
+    );
+    expect(resumeRes.status).toBe(200);
+    expect((resumeRes.body as Order).leftAt).toBeNull();
+
+    // Advance another 2 minutes (4 min since initial leave, but leftAt was cleared on resume) -> still active!
+    nowSpy.mockReturnValue(baseTime + 4 * 60000);
+    const stillActive = await invoke(handlers, "GET", "/api/checkout/active");
+    expect((stillActive.body as Order[]).map((o) => o.id)).toEqual([order.id]);
+
+    // Leave again at baseTime + 4m
+    await invoke(handlers, "POST", "/api/checkout/:sessionId/leave", {
+      params: { sessionId: order.id },
+    });
+
+    // Advance past 3-minute grace window (baseTime + 7m) -> auto-CANCELLED & stock reclaimed
+    nowSpy.mockReturnValue(baseTime + 7 * 60000);
+    const afterGrace = await invoke(handlers, "GET", "/api/checkout/active");
+    expect(afterGrace.body).toEqual([]);
+    expect(variant?.availableInventory).toBe(12);
+
+    const persisted = JSON.parse(
+      localStorage.getItem("dbOrders") || "[]",
+    ) as Order[];
+    expect(persisted.find((o) => o.id === order.id)?.status).toBe("CANCELLED");
   });
 });

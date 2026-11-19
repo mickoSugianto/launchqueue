@@ -15,4 +15,7 @@ jest.mock("next/navigation", () => ({
       slug: "knicks-hoodie",
     };
   },
+  usePathname() {
+    return "/";
+  },
 }));

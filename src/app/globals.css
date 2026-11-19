@@ -127,4 +127,12 @@
   html {
     @apply font-sans;
   }
+  select.appearance-none {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+  }
+  select.appearance-none::picker-icon {
+    display: none;
+  }
 }

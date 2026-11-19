@@ -2,6 +2,12 @@ import { http, HttpResponse, delay } from "msw";
 import { mockCampaign, mockShippingRates } from "./data";
 import { Order, OrderStatus, Campaign, Customer } from "../types";
 import { ORDER_STATUS_FLOW } from "@/lib/constants";
+import {
+  expireOrderIfNeeded,
+  getOrders,
+  saveOrderList,
+  sweepExpiredOrders,
+} from "@/lib/checkoutStorage";
 
 // LOCALSTORAGE
 const IS_BROWSER = typeof window !== "undefined";
@@ -24,82 +30,11 @@ if (IS_BROWSER) {
   }
 }
 
-// THE SEED DATA
-const defaultOrders: Order[] = [
-  {
-    id: "debug_123",
-    campaignId: "camp_kith_jkt_001",
-    variantId: "var_kith_blk_l",
-    status: "IN_PRODUCTION",
-
-    totalPcs: 1,
-    totalWeightKG: 1.25,
-
-    subtotal: 2500000,
-    shippingFee: 9000,
-    totalAmount: 2509000,
-
-    lockedAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 15 * 60000).toISOString(),
-
-    customer: {
-      fullName: "Developer Mode",
-      email: "dev@launchqueue.com",
-      whatsapp: "08123456789",
-      shippingAddress: "Jl. Sudirman Kav 21",
-      city: "Jakarta",
-      postalCode: "12190",
-    },
-
-    item: {
-      name: "Kith for the New York Knicks",
-      color: "Black",
-      size: "L",
-      heroImage: "/images/KITH_NEW_YORK_KNICKS_BLACK_FRONT.webp",
-    },
-  },
-];
-
 const getCampaigns = (): Campaign[] => {
   if (!globalStore.dbCampaigns) {
     globalStore.dbCampaigns = deepClone(mockCampaign);
   }
   return globalStore.dbCampaigns as Campaign[];
-};
-
-const getOrders = (): Order[] => {
-  if (IS_BROWSER) {
-    const stored = localStorage.getItem("dbOrders");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          return parsed as Order[];
-        }
-      } catch {
-        // Re-seed corrupted storage below
-      }
-    }
-
-    // IF EMPTY OR CORRUPTED, SEED IT WITH DEBUG ORDER
-    const seeded = deepClone(defaultOrders);
-    localStorage.setItem("dbOrders", JSON.stringify(seeded));
-    return seeded;
-  }
-
-  // FALLBACK FOR SSR / TESTS
-  if (!globalStore.dbOrders) {
-    globalStore.dbOrders = deepClone(defaultOrders);
-  }
-  return globalStore.dbOrders as Order[];
-};
-
-const saveOrderList = (newOrders: Order[]) => {
-  if (IS_BROWSER) {
-    localStorage.setItem("dbOrders", JSON.stringify(newOrders));
-  } else {
-    globalStore.dbOrders = newOrders;
-  }
 };
 
 const reclaimVariantStock = (order: Order) => {
@@ -113,50 +48,11 @@ const reclaimVariantStock = (order: Order) => {
   }
 };
 
-const expireOrderIfNeeded = (orders: Order[], orderIndex: number): boolean => {
-  const order = orders[orderIndex];
-  if (!order || order.status !== "AWAITING_PAYMENT") {
-    return false;
-  }
-
-  if (Date.now() >= new Date(order.expiresAt).getTime()) {
-    order.status = "EXPIRED";
-    reclaimVariantStock(order);
-    saveOrderList(orders);
-    return true;
-  }
-
-  return false;
-};
-
-const sweepExpiredOrders = (): Order[] => {
-  const orders = getOrders();
-  const now = Date.now();
-  let changed = false;
-
-  for (const order of orders) {
-    if (
-      order.status === "AWAITING_PAYMENT" &&
-      now >= new Date(order.expiresAt).getTime()
-    ) {
-      order.status = "EXPIRED";
-      reclaimVariantStock(order);
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    saveOrderList(orders);
-  }
-
-  return orders;
-};
-
 export const handlers = [
   // HOMEPAGE: GET ALL CAMPAIGNS
   http.get("/api/campaigns", async () => {
     await delay(500);
-    sweepExpiredOrders();
+    sweepExpiredOrders(reclaimVariantStock);
 
     return HttpResponse.json(getCampaigns());
   }),
@@ -164,7 +60,7 @@ export const handlers = [
   // 1. FETCH CAMPAIGN ENDPOINT
   http.get("/api/campaigns/:slug", async ({ params }) => {
     await delay(800);
-    sweepExpiredOrders();
+    sweepExpiredOrders(reclaimVariantStock);
 
     const dbCampaign = getCampaigns().find((c) => c.slug === params.slug);
 
@@ -221,7 +117,7 @@ export const handlers = [
       return HttpResponse.json({ error: "INVALID_REQUEST" }, { status: 400 });
     }
 
-    const orders = sweepExpiredOrders();
+    const orders = sweepExpiredOrders(reclaimVariantStock);
 
     const dbCampaign = getCampaigns().find((c) => c.slug === body.slug);
     if (!dbCampaign || !dbCampaign.isActive) {
@@ -310,6 +206,28 @@ export const handlers = [
     return HttpResponse.json(newOrder);
   }),
 
+  // 3B. ACTIVE CHECKOUT HOLDS ENDPOINT (REGISTERED BEFORE :sessionId)
+  http.get("/api/checkout/active", async ({ request }) => {
+    const orders = sweepExpiredOrders(reclaimVariantStock);
+    const campaignId = request?.url
+      ? new URL(request.url, "http://localhost").searchParams.get("campaignId")
+      : null;
+
+    const active = orders
+      .filter(
+        (o) =>
+          o.id !== "debug_123" &&
+          o.status === "AWAITING_PAYMENT" &&
+          (!campaignId || o.campaignId === campaignId),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.lockedAt).getTime() - new Date(a.lockedAt).getTime(),
+      );
+
+    return HttpResponse.json(active);
+  }),
+
   // 4. THE HYDRATION ENDPOINT (GET CHECKOUT SESSION)
   http.get("/api/checkout/:sessionId", async ({ params }) => {
     await delay(500);
@@ -322,15 +240,101 @@ export const handlers = [
       return HttpResponse.json({ error: "SESSION_NOT_FOUND" }, { status: 404 });
     }
 
-    // SECURITY: EXPIRE ONLY AWAITING_PAYMENT ORDERS PAST expiresAt
-    expireOrderIfNeeded(orders, orderIndex);
+    // SECURITY: EXPIRE ONLY AWAITING_PAYMENT ORDERS PAST expiresAt OR 3-MIN GRACE
+    expireOrderIfNeeded(orders, orderIndex, reclaimVariantStock);
     const order = orders[orderIndex];
 
     if (order.status === "EXPIRED") {
       return HttpResponse.json({ error: "SESSION_EXPIRED" }, { status: 410 });
     }
 
+    if (order.status === "CANCELLED") {
+      return HttpResponse.json({ error: "SESSION_CANCELLED" }, { status: 410 });
+    }
+
+    // BUYER RESUMED CHECKOUT WITHIN 3-MIN GRACE WINDOW: CLEAR leftAt
+    if (order.status === "AWAITING_PAYMENT" && order.leftAt) {
+      order.leftAt = null;
+      saveOrderList(orders);
+    }
+
     return HttpResponse.json(order);
+  }),
+
+  // 4B. CANCEL / ABANDON CHECKOUT SESSION
+  http.post("/api/checkout/:sessionId/cancel", async ({ params }) => {
+    await delay(400);
+
+    const orders = getOrders();
+    const orderIndex = orders.findIndex((o) => o.id === params.sessionId);
+
+    if (orderIndex === -1) {
+      return HttpResponse.json({ error: "SESSION_NOT_FOUND" }, { status: 404 });
+    }
+
+    expireOrderIfNeeded(orders, orderIndex, reclaimVariantStock);
+    const order = orders[orderIndex];
+
+    if (order.status === "EXPIRED" || order.status === "CANCELLED") {
+      return HttpResponse.json({ success: true, status: order.status });
+    }
+
+    if (order.status !== "AWAITING_PAYMENT") {
+      return HttpResponse.json(
+        {
+          error: "ORDER_ALREADY_COMPLETED",
+          receiptUrl: `/receipt/${order.id}`,
+        },
+        { status: 409 },
+      );
+    }
+
+    order.status = "CANCELLED";
+    order.leftAt = null;
+    reclaimVariantStock(order);
+    saveOrderList(orders);
+
+    return HttpResponse.json({ success: true, status: "CANCELLED" });
+  }),
+
+  // 4C. MARK CHECKOUT SESSION AS LEFT (3-MIN GRACE WINDOW)
+  http.post("/api/checkout/:sessionId/leave", async ({ params }) => {
+    const orders = getOrders();
+    const orderIndex = orders.findIndex((o) => o.id === params.sessionId);
+
+    if (orderIndex === -1) {
+      return HttpResponse.json({ error: "SESSION_NOT_FOUND" }, { status: 404 });
+    }
+
+    expireOrderIfNeeded(orders, orderIndex, reclaimVariantStock);
+    const order = orders[orderIndex];
+
+    if (order.status === "EXPIRED") {
+      return HttpResponse.json({ error: "SESSION_EXPIRED" }, { status: 410 });
+    }
+
+    if (order.status === "CANCELLED") {
+      return HttpResponse.json({ error: "SESSION_CANCELLED" }, { status: 410 });
+    }
+
+    if (order.status !== "AWAITING_PAYMENT") {
+      return HttpResponse.json({
+        success: true,
+        status: order.status,
+        leftAt: null,
+      });
+    }
+
+    if (!order.leftAt) {
+      order.leftAt = new Date(Date.now()).toISOString();
+      saveOrderList(orders);
+    }
+
+    return HttpResponse.json({
+      success: true,
+      status: order.status,
+      leftAt: order.leftAt,
+    });
   }),
 
   // 5. THE FINALIZATION ENDPOINT (PROCESS PAYMENT & COMPLETE ORDER)
@@ -362,12 +366,16 @@ export const handlers = [
       return HttpResponse.json({ error: "ORDER_NOT_FOUND" }, { status: 404 });
     }
 
-    // SECURITY CHECK: MAKE SURE IT HASN'T EXPIRED WHILE THEY WERE TYPING
-    expireOrderIfNeeded(orders, orderIndex);
+    // SECURITY CHECK: MAKE SURE IT HASN'T EXPIRED OR BEEN CANCELLED WHILE THEY WERE TYPING
+    expireOrderIfNeeded(orders, orderIndex, reclaimVariantStock);
     const order = orders[orderIndex];
 
     if (order.status === "EXPIRED") {
       return HttpResponse.json({ error: "SESSION_EXPIRED" }, { status: 410 });
+    }
+
+    if (order.status === "CANCELLED") {
+      return HttpResponse.json({ error: "SESSION_CANCELLED" }, { status: 410 });
     }
 
     if (order.status !== "AWAITING_PAYMENT") {
@@ -375,6 +383,7 @@ export const handlers = [
         {
           error: "ORDER_ALREADY_COMPLETED",
           receiptUrl: `/receipt/${order.id}`,
+          order,
         },
         { status: 409 },
       );
@@ -394,6 +403,7 @@ export const handlers = [
 
     // FINALIZE THE ORDER
     order.status = "PAYMENT_VERIFIED";
+    order.leftAt = null;
     order.customer = shippingDetails;
 
     // RECALCULATE THE SHIPPING FEE BASED ON THE SUBMITTED CITY
@@ -408,13 +418,14 @@ export const handlers = [
     return HttpResponse.json({
       success: true,
       receiptUrl: `/receipt/${sessionId}`,
+      order,
     });
   }),
 
   // 6. ADMIN: FETCH ALL ORDERS
   http.get("/api/admin/orders", async () => {
     await delay(400);
-    return HttpResponse.json(sweepExpiredOrders());
+    return HttpResponse.json(sweepExpiredOrders(reclaimVariantStock));
   }),
 
   // 7. ADMIN: MUTATE ORDER STATUS

@@ -54,6 +54,11 @@ describe("Admin Dashboard = Kanban Flow & Optimistic Mutations", () => {
   it("renders the kanban board and maps orders to the correct columns", () => {
     render(<AdminDashboard />);
 
+    // Check header home link
+    expect(
+      screen.getByRole("link", { name: /← LaunchQueue/i }),
+    ).toHaveAttribute("href", "/");
+
     // Check the order details (fullName, item.name)
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
     expect(screen.getByText(/Premium Heavy Knitwear/i)).toBeInTheDocument();
@@ -186,7 +191,9 @@ describe("Admin Dashboard = Kanban Flow & Optimistic Mutations", () => {
   });
 
   // TEST 5: ERROR SCREEN
-  it("renders error screen when useAdminOrders fails", () => {
+  it("renders error screen with Retry button when useAdminOrders fails", async () => {
+    const user = userEvent.setup();
+
     (useAdminOrders as jest.Mock).mockReturnValue({
       rawOrders: undefined,
       activeOrders: [],
@@ -200,6 +207,9 @@ describe("Admin Dashboard = Kanban Flow & Optimistic Mutations", () => {
     expect(
       screen.getByText("Failed to load fulfillment pipeline."),
     ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Retry/i }));
+    expect(mockMutate).toHaveBeenCalledTimes(1);
   });
 
   // TEST 6: SAFE ORDER DISPLAY CODE FORMATTING
@@ -245,5 +255,42 @@ describe("Admin Dashboard = Kanban Flow & Optimistic Mutations", () => {
       warnSpy.mockRestore();
       errorSpy.mockRestore();
     }
+  });
+
+  it("useAdminOrders excludes AWAITING_PAYMENT, EXPIRED, and CANCELLED orders", async () => {
+    const { SWRConfig } = jest.requireActual("swr");
+    const actualHook = jest.requireActual(
+      "@/lib/hooks/useAdminOrders",
+    ) as typeof import("@/lib/hooks/useAdminOrders");
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => [
+        { ...mockOrderBase, id: "ord_paid", status: "PAYMENT_VERIFIED" },
+        { ...mockOrderBase, id: "ord_awaiting", status: "AWAITING_PAYMENT" },
+        { ...mockOrderBase, id: "ord_expired", status: "EXPIRED" },
+        { ...mockOrderBase, id: "ord_cancelled", status: "CANCELLED" },
+      ],
+    });
+
+    function Probe() {
+      const { activeOrders, isLoading } = actualHook.useAdminOrders();
+      if (isLoading) return <div>loading</div>;
+      return (
+        <div data-testid="active-ids">
+          {activeOrders.map((o: { id: string }) => o.id).join(",")}
+        </div>
+      );
+    }
+
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <Probe />
+      </SWRConfig>,
+    );
+
+    expect(await screen.findByTestId("active-ids")).toHaveTextContent(
+      "ord_paid",
+    );
   });
 });
